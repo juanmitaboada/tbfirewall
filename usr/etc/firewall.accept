@@ -1,0 +1,14 @@
+/
+####### FIREWALL ACCEPT #######################################################
+# TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com   #
+# direccion ip determinada:                                                   #
+#  <Direccion IP> <Dispositivo>                                               #
+#  192.168.0.3  eth0                                                          #
+#  Permite el acceso a todos los servicios para la ip 192.168.0.3 en eth0     #
+###############################################################################
+/
+
+/ 83.61.10.29     eth0  / / Office fully accepted /
+/ 192.168.252.5   tun0 /
+/ 192.168.241.5   tun1 /
+51.254.79.118 eth0

@@ -1,0 +1,26 @@
+#!/bin/sh
+
+# Configuracion
+DESPROTEGER="SI"
+SERVER="LIDIA"
+ORIGEN="Lidia Ivery <systems@centrologic.com>"
+AVISAR=""
+AVISAR="$AVISAR systems@centrologic.com"    # Sistemas .COM
+AVISAR="$AVISAR juanmi@centrologic.com"     # Propietario .COM
+AVISAR="$AVISAR juanmi@juanmitaboada.com"   # Propietario
+
+# Recojo el estado del firewall
+ESTADO=`/usr/sbin/tbfirewall status | /bin/grep TBFirewall | /usr/bin/cut -d ' ' -f 2`
+
+# Actuo si no se detecta un estado válido
+if [[ $ESTADO != "Si" ]] ; then
+    if [[ $DESPROTEGER == "SI" ]] ; then
+        echo "=== Desprotegiendo sistema ==="
+        /usr/sbin/tbfirewall open
+    fi
+    echo "=== Enviando email ==="
+    for EMAIL in $AVISAR ; do
+        echo "Avisada la dirección: $EMAIL"
+        echo -e "ATENCION:\n\nNo se ha detectado un estado valido del Firewall en $SERVER, se ha procedido a dar aviso en las direcciones de email:$AVISAR\n\nLa opcion para desproteger el sistema estaba a $DESPROTEGER.\nSALIDA DEL PROGRAMA: $ESTADO.\n\nTome las medidas oportunas inmediatamente para solucionar el problema.\n\nFdo: $SERVER!" | /usr/bin/mutt -e "my_hdr From: $ORIGEN" -s "$SERVER: FIREWALL ERROR" $EMAIL
+    done
+fi

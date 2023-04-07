@@ -1,0 +1,706 @@
+#! /bin/sh
+#
+# Descripcion de este archivo: front-end para firewall.kern
+# Requerimientos: Los servicios de red han de estar cargados.
+#
+# TBFirewall v3.1
+# Autor: Juanmi Taboada
+# Creado: 6 de Marzo de 2000
+# Ultima actualizacion: 5 de Enero de 2002
+# Correo electronico: juanmi@juanmitaboada.com
+# Pagina web: http://www.juanmitaboada.com
+
+# He preparado el front-end para que pueda ser facilmente traducible,
+# unicamente hay que traducir la siguiente cabezera "estado)" por "stat)" y
+# busca la cadena "echo" y modifica todos los textos que encuentres. :-)
+
+# Recoge si el firewall esta activado o no
+FIREWALL="1"
+[ -f /var/lock/subsys/tbfirewall ] || FIREWALL="0"
+
+# Otras informaciones importantes
+MASQUERADING="1"            # Activa las reglas de masquerading (1)
+TODAS="0.0.0.0/0"                       # Especificacion para todas las IPs
+MASQ=`cat /usr/etc/firewall.masq`   # Lee las tablas de enmascaramiento
+VARLOG=`cat /usr/etc/firewall.log`      # Lee si se va a loguear todo o no
+LOG=""
+if [ ${VARLOG} = "1" ] ; then
+  # Loguear aquello que no este logueado
+   LOG="-l"
+fi
+
+# Bloquea o desbloque TBFirewall en el sistema
+case "$1" in
+  start|inicia|iniciar)
+    echo -n "TBFirewall: "
+    echo -n "Inicia: "
+    KEY="start"
+  ;;
+  stop|detiene|detener)
+    echo -n "TBFirewall: "
+    echo -n "Detente: "
+    KEY="stop"
+  ;;
+  abre|abrir|open)
+    echo -n "TBFirewall: "
+    echo -n "Abre: "
+    KEY="open"
+  ;;
+  cierra|cerrar|close)
+    echo -n "TBFirewall: "
+    echo -n "Cierra: "
+    KEY="close"
+  ;;
+  reglas|chains)
+    echo -n "TBFirewall: "
+    echo -n "Muestra las reglas: "
+    KEY="chains"
+  ;;
+  reinicia|recarga|reiniciar|recargar|restart|reload)
+    echo -n "TBFirewall: "
+    echo -n "Reinicia: "
+    KEY="restart"
+  ;;
+  estado|info|status)
+    echo -n "TBFirewall: "
+    KEY="status"
+  ;;
+  loguea|loguear|log)
+    echo -n "TBFirewall: "
+    if [ ${VARLOG} = "1" ] ; then
+      echo -n "Deten el Logueador: "
+    else
+      echo -n "Inicia el Logueador: "
+    fi
+    KEY="log"
+  ;;
+  ayuda|helpme)
+    echo -n "TBFirewall: "
+    echo -n "Muestra ayuda: "
+    KEY="helpme"
+  ;;
+  inet)
+    echo -n "TBFirewall: "
+    if [ ${INET} = "1" ] ; then
+      echo -n "Descargar Internet: "
+    else
+      echo -n "Cargar Interner: "
+    fi
+    KEY="inet"
+esac
+
+# Libreria de funciones.
+. /etc/init.d/tbfirewall.functions
+
+# Recoge la configuracion de red.
+#. /etc/sysconfig/network
+
+# Chequea si los servicios de red estan activos.
+#if [ ${NETWORKING} = "no" ]
+#then
+#  ERROR="A"
+#fi
+
+# Testea la existencia de todos los archivos que se van a usar
+[ -f /sbin/iptables ] || ERROR="B"
+[ -f /usr/sbin/tbfirewall.kern ] || ERROR="C"
+[ -f /usr/etc/firewall.accept ] || ERROR="D"
+[ -f /usr/etc/firewall.control ] || ERROR="E"
+[ -f /usr/etc/firewall.deny ] || ERROR="F"
+[ -f /usr/etc/firewall.ether ] || ERROR="G"
+[ -f /usr/etc/firewall.inet ] || ERROR="H"
+[ -f /usr/etc/firewall.input ] || ERROR="I"
+[ -f /usr/etc/firewall.iptables ] || ERROR="J"
+[ -f /usr/etc/firewall.ips ] || ERROR="K"
+[ -f /usr/etc/firewall.log ] || ERROR="L"
+[ -f /usr/etc/firewall.masq ] || ERROR="M"
+[ -f /usr/etc/firewall.output ] || ERROR="N"
+[ -f /usr/etc/firewall.return ] || ERROR="O"
+
+    # Asignaciones locales (Se obtienen mediante una carga automatica)
+    PPP="CLEAR"
+    ETH0="CLEAR"
+    ETH1="CLEAR"
+    ETH2="CLEAR"
+    ETH3="CLEAR"
+    INETIP=`cat /usr/etc/firewall.ips`         # Tabla de IPs
+    FIREWALLINET=`cat /usr/etc/firewall.inet`  # Conectados o no
+    # Lectura/Escritura de la direccion IP INTERNET y de la INTRANET
+    count="6"
+    count2="0"
+    LINEA="A"
+    FIPFILE="OK"
+    for VARINET in $INETIP ; do
+      case $VARINET in
+        /) # Linea comentada
+          if [ ${LINEA} = "A" ] ; then
+            LINEA="D"
+          else
+            LINEA="A"
+          fi
+        ;;
+        *)
+          if [ ${LINEA} = "A" ] ; then # Indice para indicar que dispositivo es.
+            case $VARINET in
+              I) # El dispositivo de esa linea es el de Internet
+                count="0"
+              ;;
+              E) # Vamos a tratar con un dispositivo ethernet (Intranet)
+                count="2"
+              ;;
+              L) # Datos de la red local general (todos los dispositivos)
+                count="5"
+              ;;
+              SPOOFING) # Protección contra spoofing y direcciones ilegales (1)
+                count="6"
+              ;;
+              BROADCASTPROTECTION) # Indica si proteger o no el BROADCAST (1)
+                count="7"
+              ;;
+              TRANSPARENTSERVER) # Hacer transparente el DNS para todos los accesos (0)
+                count="8"
+              ;;
+              INFORMADOR) # Mostrar información acerca de la configuración
+                count="9"
+              ;;
+              *)
+                case $count in
+                  0) # Lee la direccion IP
+                    INETIPADDR=$VARINET
+                count="1"
+              ;;
+              1) # Lee el dispositivo
+                INETDISP=$VARINET
+                count="2"
+              ;;
+              2) # Lee las direccion IP de la Intranet
+                case $count2 in
+                  0) # IP0 de ETH0
+                    IP0=$VARINET
+                  ;;
+                  1) # IP1 de ETH1
+                    IP1=$VARINET
+                  ;;
+                  2) # IP2 de ETH2
+                    IP2=$VARINET
+                      ;;
+                  3) # IP3 de ETH3
+                    IP3=$VARINET
+              ;;
+              4) # No hay mas dispositivos ERROR
+                FIPFILE="BAD"
+                  esac
+                count="3"
+              ;;
+              3) # Lee el dispositivo de dicha IP
+                case $count2 in
+                  0) # ETH0
+                    ETH0=$VARINET
+                  ;;
+                  1) # ETH1
+                    ETH1=$VARINET
+                  ;;
+                  2) # ETH2
+                    ETH2=$VARINET
+                  ;;
+                  3) # ETH3
+                    ETH3=$VARINET
+              ;;
+              4) # No hay mas dispositivos ERROR
+                FIPFILE="BAD"
+                  esac
+                count="4"
+              ;;
+              4) # Lee los datos de la red local por dispositivos (LOCALNET*)
+                    case $count2 in
+                      0) # ETH0
+                    LOCALNET0=$VARINET
+                    count2="1"
+                  ;;
+                  1) # ETH1
+                    LOCALNET1=$VARINET
+                    count2="2"
+                  ;;
+                  2) # ETH2
+                    LOCALNET2=$VARINET
+                    count2="3"
+                  ;;
+                  3) # ETH3
+                    LOCALNET3=$VARINET
+                    count2="4"
+              ;;
+              4) # No hay mas dispositivos ERROR
+                FIPFILE="BAD"
+                esac
+                count="2"
+             ;;
+             5) # Lee los datos de la red local general (LOCALNET)
+               LOCALNET=$VARINET
+               count="2"
+             ;;
+             6) # Proteccion contra spoofing y direcciones ilegales (1)
+               SPOOFING=$VARINET
+             count="2"
+             ;;
+             7) # Indica si proteger o no el BROADCAST (1)
+               BROADCASTPROTECTION=$VARINET
+             count="2"
+             ;;
+             8) # Hacer transparente el DNS para todos los accesos (0)
+               TRANSPARENTSERVER=$VARINET
+             count="2"
+             ;;
+             9) # Mostrar información acerca de la configuración (1)
+               INFO=$VARINET
+             count="2"
+            esac
+               esac
+             fi
+          esac
+       done
+    if [ ${FIPFILE} = "BAD" ] ; then
+      count="10"
+    fi
+    if [ ${count} = "10" ] ; then
+      ERROR="P"
+    fi
+    LINEA="A"
+    if [ ${FIREWALLINET} = "1" ] ; then
+        if [ -z ${INETADDR} ] ; then
+          # Se actualiza la variable de memoria por la IP del archivo de configuracion
+          INETADDR=${INETIPADDR}
+        fi
+      PPP=$INETDISP
+    fi
+
+# Muestra los mensajes de error y sale del script
+case $ERROR in
+  A) # Los servicios de red no han sido cargados
+    echo "Los servicios de red no han sido cargados..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  B)
+    # Archivo /sbin/iptables no encontrado
+    echo "El archivo /sbin/iptables no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  C)
+    # Archivo /usr/sbin/tbfirewall.kern no encontrado
+    echo "El archivo /usr/sbin/tbfirewall.kern no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  D)
+    # Archivo /usr/etc/firewall.accept no encontrado
+    echo "El archivo /usr/etc/firewall.accept no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  E)
+    # Archivo /usr/etc/firewall.control no encontrado
+    echo "El archivo /usr/etc/firewall.control no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  F)
+    # Archivo /usr/etc/firewall.deny no encontrado
+    echo "El archivo /usr/etc/firewall.deny no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  G)
+    # Archivo /usr/etc/firewall.ether no encontrado
+    echo "El archivo /usr/etc/firewall.ether no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  H)
+    # Archivo /usr/etc/firewall.inet no encontrado
+    echo "El archivo /usr/etc/firewall.inet no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  I)
+    # Archivo /usr/etc/firewall.input no encontrado
+    echo "El archivo /usr/etc/firewall.input no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  J)
+    # Archivo /usr/etc/firewall.iptables no encontrado
+    echo "El archivo /usr/etc/firewall.iptables no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  K)
+    # Archivo /usr/etc/firewall.ips no encontrado
+    echo "El archivo /usr/etc/firewall.ips no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  L)
+    # Archivo /usr/etc/firewall.log no encontrado
+    echo "El archivo /usr/etc/firewall.log no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  M)
+    # Archivo /usr/etc/firewall.masq no encontrado
+    echo "El archivo /usr/etc/firewall.masq no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  N)
+    # Archivo /usr/etc/firewall.output no encontrado
+    echo "El archivo /usr/etc/firewall.output no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+    ;;
+  O)
+    # Archivo /usr/etc/firewall.return no encontrado
+    echo "El archivo /usr/etc/firewall.return no existe..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+  ;;
+  P)
+    # Archivo /usr/etc/firewall.ips mal configurado
+    echo "El archivo /usr/etc/firewall.ips esta mal configurado o se ha"
+    echo "excedido el numero maximo de dispositivos..."
+    echo -n "Resolucion de problemas: "
+    echo_failure
+    echo
+    exit 0
+esac
+
+# Comprobamos que rutina hemos de realizar
+case $KEY in
+  start)
+        # Comprobamos si el TBFirewall esta cargado
+    case "$FIREWALL" in
+    1)
+        # TBFirewall esta funcionando
+        echo -n "Ya estaba funcionando..."
+        echo_passed
+        echo
+    ;;
+    0)
+            # Inicia TBFirewall
+        echo -n "Iniciando..."
+        /usr/sbin/tbfirewall.kern
+        FIREWALL="1"
+        echo_success
+        echo
+    esac
+    ;;
+  stop)
+      # Comprueba si firewall estaba descargado
+      case "$FIREWALL" in
+      1)
+            # Detiene TBFirewall
+        echo -n "Deteniendo..."
+        /sbin/iptables -F
+        /sbin/iptables -t nat -F
+        /sbin/iptables -P FORWARD DROP
+        /sbin/iptables -P INPUT DROP
+        /sbin/iptables -P OUTPUT DROP
+        FIREWALL="0"
+        echo_success
+        echo
+      ;;
+      0)
+            # TBFirewall ya estaba parado
+        echo -n "Ya estaba parado..."
+        echo_passed
+        echo
+      esac
+  ;;
+  status)
+        # Comprueba si firewall estaba cargado
+    case "$FIREWALL" in
+    0)
+        # TBFirewall esta parado
+        echo -n "No esta en funcionamiento..."
+        echo_failure
+        echo
+        ;;
+    1)
+            # TBFirewall esta funcionando
+        echo -n "Si esta en funcionamiento..."
+        echo_success
+        echo
+        ;;
+    *)
+        # TBFirewall está en un estado incogruente
+        echo -n "Estado desconocido..."
+        echo_failure
+        echo
+    esac
+        echo "==================================================================="
+    # Muestar informacion acerca de los dispositivos en funcionamiento
+    # Informacion
+    echo "Localnet:   $LOCALNET"
+    if [ ${PPP} != "CLEAR" ] ; then
+    echo "Internet:   $INETADDR en $PPP"
+    else
+    echo "Internet:   <No esta conectado a Internet>"
+    fi
+    if [ ${ETH0} != "CLEAR" ] ; then
+    echo "Dispositivo 0:    $IP0 en $ETH0   Broadcast 0: $LOCALNET0"
+    fi
+    if [ ${ETH1} != "CLEAR" ] ; then
+    echo "Dispositivo 1:    $IP1 en $ETH1   Broadcast 1: $LOCALNET1"
+    fi
+    if [ ${ETH2} != "CLEAR" ] ; then
+    echo "Dispositivo 2:    $IP2 en $ETH2   Broadcast 2: $LOCALNET2"
+    fi
+    if [ ${ETH3} != "CLEAR" ] ; then
+    echo "Dispositivo 3:    $IP3 en $ETH3   Broadcast 3: $LOCALNET3"
+    fi
+    if [ ${VARLOG} = "1" ] ; then
+    echo "           ---> El LOGUEADOR de paquetes esta ACTIVADO <---"
+    fi
+        echo "==================================================================="
+        echo -n "Resolucion de problemas: "
+    if [ ${FIREWALL} = "1" ] ; then
+      echo_success
+    else
+          echo_passed
+    fi
+        echo
+    ;;
+  open)
+      # Abre todos los puertos del firewall
+      echo -n "Abriendo todos los puertos..."
+      /./sbin/iptables -F
+      /./sbin/iptables -t nat -F
+      /./sbin/iptables -P FORWARD ACCEPT
+      /./sbin/iptables -P INPUT ACCEPT
+      /./sbin/iptables -P OUTPUT ACCEPT
+# ---------->>>>>>>>>>> REENVIO DE PAQUETES <<<<<<<<<<<<<<---------
+# Posibilito el reenvio de paquetes
+echo "1" > /proc/sys/net/ipv4/ip_forward
+
+if [ ${MASQUERADING} = "1" ] ; then
+LINEA="A"
+# ------------->>>>>>>>>>> MASQUERADING <<<<<<<<<<<<<<-------------
+# Se configura masquerading para permitir Internet a las maquinas locales.
+for IPMASQ in $MASQ ; do
+  case $IPMASQ in
+    /) # Linea comentada
+        if [ ${LINEA} = "A" ] ; then
+          LINEA="D"
+        else
+          LINEA="A"
+        fi
+        ;;
+    *)
+        if [ ${LINEA} = "A" ] ; then
+          /sbin/iptables -t nat -A POSTROUTING -o $PPP -s $IPMASQ -d $TODAS -j MASQUERADE $LOG
+        fi
+  esac
+done
+fi
+# ###############################################################
+      FIREWALL="0"
+      echo_success
+      echo
+      ;;
+  close)
+      # Cierra todos los puertos del firewall
+      echo -n "Cerrando todos los puertos..."
+      /./sbin/iptables -F
+      /./sbin/iptables -t nat -F
+      /./sbin/iptables -P FORWARD DROP
+      /./sbin/iptables -P INPUT DROP
+      /./sbin/iptables -P OUTPUT DROP
+      FIREWALL="0"
+      echo_success
+      echo
+      ;;
+  chains)
+      # Listado de reglas del firewall
+      echo -n "Listando..."
+      echo_success
+      echo
+      echo "==================================================================="
+      /./sbin/iptables -L
+        echo "==================================================================="
+    # Muestar informacion acerca de los dispositivos en funcionamiento
+    # Informacion
+    echo "Localnet:   $LOCALNET"
+    if [ ${PPP} != "CLEAR" ] ; then
+    echo "Internet:   $INETADDR en $PPP"
+    else
+    echo "Internet:   <No esta conectado a Internet>"
+    fi
+    if [ ${ETH0} != "CLEAR" ] ; then
+    echo "Dispositivo 0:    $IP0 en $ETH0   Broadcast 0: $LOCALNET0"
+    fi
+    if [ ${ETH1} != "CLEAR" ] ; then
+    echo "Dispositivo 1:    $IP1 en $ETH1   Broadcast 1: $LOCALNET1"
+    fi
+    if [ ${ETH2} != "CLEAR" ] ; then
+    echo "Dispositivo 2:    $IP2 en $ETH2   Broadcast 2: $LOCALNET2"
+    fi
+    if [ ${ETH3} != "CLEAR" ] ; then
+    echo "Dispositivo 3:    $IP3 en $ETH3   Broadcast 3: $LOCALNET3"
+    fi
+    if [ ${VARLOG} = "1" ] ; then
+    echo "           ---> El LOGUEADOR de paquetes esta ACTIVADO <---"
+    fi
+        echo "==================================================================="
+        echo -n "Resolucion de problemas: "
+        echo_success
+    echo
+  ;;
+  restart)
+        # Comprueba si el firewall esta cargado
+    case "$FIREWALL" in
+    0) # No reinicia el firewall
+      echo -n "TBFirewall no esta cargado..."
+      echo_failure
+      echo
+    ;;
+    1) # Reinicia el firewall
+        echo -n "Reiniciando..."
+            # Detiene los servicios de TBFirewall
+        /sbin/iptables -F
+        /sbin/iptables -t nat -F
+        /sbin/iptables -P FORWARD DROP
+        /sbin/iptables -P INPUT DROP
+        /sbin/iptables -P OUTPUT DROP
+
+            # Inicia los servicios de TBFirewall
+        /usr/sbin/tbfirewall.kern
+        echo_success
+        echo
+    esac
+  ;;
+  log) # Loguea todos los paquetes
+  if [ $FIREWALL = "1" ] ; then
+    if [ $VARLOG = "1" ] ; then
+      echo -n "Deteniendo..."
+      echo "0" > /usr/etc/firewall.log
+    else
+      echo -n "Iniciando..."
+      echo "1" > /usr/etc/firewall.log
+    fi
+    # Detiene los servicios de TBFirewall
+    /sbin/iptables -F
+    /sbin/iptables -t nat -F
+    /sbin/iptables -P FORWARD DROP
+    /sbin/iptables -P INPUT DROP
+    /sbin/iptables -P OUTPUT DROP
+    # Inicia los servicios de TBFirewall
+    /usr/sbin/tbfirewall.kern
+    echo_success
+    echo
+  else
+    echo -n "TBF no esta cargado..."
+    echo_failure
+    echo
+  fi
+  ;;
+  helpme)
+    # Muestra la ayuda
+    DOC="1"
+    [ -f /usr/doc/TBFirewall-*/MANUAL ] || DOC="0"
+    if [ $DOC = "0" ] ; then
+      echo -n "Ayuda no instalada..."
+      echo_failure
+      echo
+    else
+      echo -n "Mostrando..."
+      echo_success
+      echo
+      echo "==================================================================="
+      less /usr/doc/TBFirewall-*/MANUAL
+      echo "==================================================================="
+      echo -n "Resolucion de problemas: "
+      echo_success
+      echo
+    fi
+  ;;
+  inet) # Reglas de Internet
+  if [ $FIREWALL = "1" ] ; then
+    if [ $INET = "1" ] ; then
+      echo -n "Deteniendo..."
+      echo "0" > /usr/etc/firewall.inet
+    else
+      echo -n "Iniciando..."
+      echo "1" > /usr/etc/firewall.inet
+    fi
+    # Detiene los servicios de TBFirewall
+    /sbin/iptables -F
+    /sbin/iptables -t nat -F
+    /sbin/iptables -P FORWARD DROP
+    /sbin/iptables -P INPUT DROP
+    /sbin/iptables -P OUTPUT DROP
+    # Inicia los servicios de TBFirewall
+    /usr/sbin/tbfirewall.kern
+    echo_success
+    echo
+  else
+    echo -n "TBF no esta cargado..."
+    echo_failure
+    echo
+  fi
+  ;;
+  *)
+echo ""
+echo "TBFirewall v3.0alfa - Juan Miguel Taboada (Enero 2002)"
+echo "---------------------------->  A Y U D A  <----------------------------"
+echo "Modo de uso Normal: tbfirewall {inicia|detiene|estado|reinicia}"
+echo "       inicia -------> Inicia TBFirewall para comenzar proteccion"
+echo "       detiene ------> Detiene TBFirewall ofrece proteccion total"
+echo "       estado -------> Muestra informacion acerca de TBFirewall"
+echo "       reinicia -----> Reinicia TBFirewall para releer las tablas"
+echo "Modo de uso Special: tbfirewall {abre|cierra|reglas|loguea}"
+echo "       abre --------> Abre todos los puertos de TBFirewall"
+echo "       cierra ------> Cierra todos los puertos de TBFirewall"
+echo "       reglas ------> Realiza un listado de las reglas de TBFirewall"
+echo "       loguea ------> Loguea todos los paquetes sin excepcion alguna"
+echo "       ayuda -------> Ayuda completa de TBFirewall"
+echo ""
+esac
+
+# Actualiza la variable de bloqueo del sistema
+if [ ${FIREWALL} = "0" ] ; then
+  rm -f /var/lock/subsys/tbfirewall
+else
+  touch /var/lock/subsys/tbfirewall
+fi
+
+exit 0

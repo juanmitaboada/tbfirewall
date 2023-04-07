@@ -1,0 +1,91 @@
+/
+####### FIREWALL IPTABLES #####################################################
+# TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com   #
+# Firewall ipchains controla el firewall a bajo nivel posibilitando aquellas  #
+# situaciones que no son posibles mediante la configuracion de tablas:        #
+#  <Comando>                                                                  #
+#  -A INPUT -p icmp -s 192.23.0.2 -d 192.23.0.1 -j DENY @                     #
+#  La direccion 192.23.0.2 no puede acceder ni ver a la direccion 192.23.0.1  #
+###############################################################################
+# Para hacer que un proxy que funciona en el puerto 8080 sea transparente     #
+# para los usuarios, tendremos que usar las siguientes reglas:                #
+# -A INPUT -i eth0 -p tcp -d 0/0 80 -j REDIRECT 8080 @                        #
+# -A INPUT -i eth1 -p tcp -d 0/0 80 -j REDIRECT 8080 @                        #
+###############################################################################
+/
+
+/ ### Denegar paquetes ### ###################################################### /
+/ IMPORTANTE: Asegurar que estas reglas están al principio /
+/ === CIERRE === /
+-A INPUT -i eth0 -p tcp --dport 22 -j DROP @
+-A INPUT -i eth0 -p udp --dport 22 -j DROP @
+-A INPUT -i tun1 -p tcp --dport 22 -j DROP @
+-A INPUT -i tun1 -p udp --dport 22 -j DROP @
+-A INPUT -i tun2 -p tcp --dport 22 -j DROP @
+-A INPUT -i tun2 -p udp --dport 22 -j DROP @
+/ === APERTURA === /
+-A INPUT -i tun0 -p tcp -s 192.168.252.5 --dport 22 -j ACCEPT @
+-A INPUT -i eth0 -p tcp --dport 1194 -j ACCEPT @
+-A INPUT -i eth0 -p udp --dport 1194 -j ACCEPT @
+-A INPUT -i tun0 -p tcp --dport 22 -j ACCEPT @
+-A INPUT -i tun0 -p udp --dport 22 -j ACCEPT @
+
+/ ### Transparencia del PROXY ### ################################################# /
+/ Regla para hacer que el proxy sea completamente transparente /
+/ -A INPUT -i eth2 -p tcp -d 80.28.98.59 --dport 80 -j ACCEPT @ /
+/ -t nat -A PREROUTING -i eth2 -p tcp --dport 80 -j REDIRECT --to-port 3128 @ / 
+/ -t nat -A PREROUTING -i eth2 -p tcp --dport 443 -j REDIRECT --to-port 3128 @ /
+
+/ ### Redirección de puertos ### ################################################# /
+/ Emule /
+/ -t nat -A PREROUTING -i eth0 -s 0/0 -d 80.28.98.59 -p tcp --dport 4662 -j DNAT --to 192.168.1.1:4662 @ /
+/ Remote Administrator /
+/ -t nat -A PREROUTING -i eth0 -s 0/0 -d 80.28.98.59 -p tcp --dport 4899 -j DNAT --to 192.168.1.1:4899 @ /
+/ Netmeeting /
+/ -t nat -A PREROUTING -i eth0 -s 0/0 -d 80.28.98.59 -p tcp --dport 389 -j DNAT --to 192.168.1.1:389 @ /
+/ -t nat -A PREROUTING -i eth0 -s 0/0 -d 80.28.98.59 -p tcp --dport 522 -j DNAT --to 192.168.1.1:522 @ /
+/ -t nat -A PREROUTING -i eth0 -s 0/0 -d 80.28.98.59 -p tcp --dport 1503 -j DNAT --to 192.168.1.1:1503 @ /
+/ -t nat -A PREROUTING -i eth0 -s 0/0 -d 80.28.98.59 -p tcp --dport 1720 -j DNAT --to 192.168.1.1:1720 @ /
+/ -t nat -A PREROUTING -i eth0 -s 0/0 -d 80.28.98.59 -p tcp --dport 1731 -j DNAT --to 192.168.1.1:1731 @ /
+/ -t nat -A PREROUTING -i eth0 -s 0/0 -d 80.28.98.59 -p tcp --dport 6987 -j DNAT --to 192.168.1.1:6987 @ /
+/ -t nat -A PREROUTING -i eth0 -s 0/0 -d 80.28.98.59 -p tcp --dport 6988 -j DNAT --to 192.168.1.1:6988 @ /
+
+/ ### NTP Servers ### ############################################### /
+/ -A INPUT -p udp -i eth0 -s 0/0 -d 212.34.136.105 --dport 123 -j ACCEPT @ /
+
+/ ### SPECIAL IPS ### ############################################### /
+-A INPUT -i eth0 -p icmp -s 0/0 -d 5.196.124.74 -j ACCEPT --icmp-type 0 @
+-A INPUT -i eth0 -p icmp -s 0/0 -d 5.196.124.74 -j ACCEPT --icmp-type 3 @
+-A INPUT -i eth0 -p icmp -s 0/0 -d 5.196.124.74 -j ACCEPT --icmp-type 5 @
+-A INPUT -i eth0 -p icmp -s 0/0 -d 5.196.124.74 -j ACCEPT --icmp-type 8 @
+-A INPUT -i eth0 -p icmp -s 0/0 -d 5.196.124.74 -j ACCEPT --icmp-type 11 @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport auth -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport domain -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport ftp -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport ftp-data -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport www -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport https -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport pop3 -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport smtp -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport pop3s -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport smtps -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport submission -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 -d 5.196.124.74 --dport imaps -j ACCEPT @
+-A INPUT -i eth0 -p udp -s 0/0 -d 5.196.124.74 --dport domain -j ACCEPT @
+-A INPUT -i eth0 -p udp -s 0/0 -d 5.196.124.74 --dport www -j ACCEPT @
+-A INPUT -i eth0 -p udp -s 0/0 -d 5.196.124.74 --dport https -j ACCEPT @
+-A INPUT -i eth0 -p udp -s 0/0 -d 5.196.124.74 --dport pop3 -j ACCEPT @
+-A INPUT -i eth0 -p udp -s 0/0 -d 5.196.124.74 --dport pop3s -j ACCEPT @
+-A INPUT -i eth0 -p udp -s 0/0 -d 5.196.124.74 --dport submission -j ACCEPT @
+-A OUTPUT -o eth0 -p icmp -s 5.196.124.74 -d 0/0 -j ACCEPT @
+-A OUTPUT -o eth0 -p tcp -s 5.196.124.74 -d 0/0 -j ACCEPT @
+-A OUTPUT -o eth0 -p udp -s 5.196.124.74 -d 0/0 -j ACCEPT @
+
+/
+# Bloqueo por usuario:
+# iptables -t filter -A OUTPUT -p tcp --dport <PORT:25600> --match owner --uid-owner <UUID:1004> -j DROP
+/
+
+/ ### Bloqueo Sistelecom ### /
+-A INPUT -i eth0 -p tcp -s 149.100.4.2 -d 0/0 --dport www -j DROP @
+

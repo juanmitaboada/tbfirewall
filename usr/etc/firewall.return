@@ -1,0 +1,10 @@
+/
+####### FIREWALL RETURN #######################################################
+# TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com   #
+# Firewall return devuelve todos los paquetes recividos de una direccion ip   #
+# determinada:                                                                #
+#  <Direccion IP> <Dispositivo>                                               #
+#  192.168.5.6  eth0                                                          #
+#  Devuelve todos los paquetes con origen 192.168.5.6 conectada a eth0        #
+###############################################################################
+/

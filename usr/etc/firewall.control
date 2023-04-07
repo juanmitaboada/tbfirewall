@@ -1,0 +1,55 @@
+/
+####### FIREWALL CONTROL ######################################################
+# TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com   #
+# Firewall control impide el acceso a los servicios para para una direccion   #
+# ip determinada:                                 #
+#  <Trato del paquete> <Direccion IP> <Dispositivo> <Protocolo> <Servicio> @  #
+#  DROP    192.168.0.0/8  eth0  tcp  www  udp  www  @                 #
+#  Impide el acceso a la web a la red 192.168.0.*                 #
+###############################################################################
+# Cuando la gente se pase mucho, por ejemplo navegando pues cierra el puerto  #
+# que maneja ese servicio para esa red y listo. Por ejemplo en mi caso cuando #
+# estoy dando una clase y estoy explicando ftp, pues cierro www para que los  #
+# alumnos no se pongan a navegar mientras yo explico.                         #
+# DROP    0/0  eth0  tcp www  udp www @  /Nadie navega mientras yo explico/   #
+###############################################################################
+/
+
+/ Controla el acceso al puerto de MYSQL /
+DROP    0/0  eth0    tcp   3306  @
+DROP    0/0  eth0    udp   3306  @
+DROP    0/0  tun0    tcp   3306  @
+DROP    0/0  tun0    udp   3306  @
+DROP    0/0  tun1    tcp   3306  @
+DROP    0/0  tun1    udp   3306  @
+DROP    0/0  tun2    tcp   3306  @
+DROP    0/0  tun2    udp   3306  @
+
+/ Controla intentos de acceso a puertos de Samba /
+DROP    0/0  eth0    tcp   445   @
+DROP    0/0  eth0    udp   445   @
+DROP    0/0  tun0    tcp   445   @
+DROP    0/0  tun0    udp   445   @
+DROP    0/0  tun1    tcp   445   @
+DROP    0/0  tun1    udp   445   @
+DROP    0/0  tun2    tcp   445   @
+DROP    0/0  tun2    udp   445   @
+
+/ Controla intentos de acceso a puertos de NuoDB /
+DROP    0/0  eth0    tcp   48004   @
+DROP    0/0  eth0    udp   48004   @
+/ DROP    0/0  tun0    tcp   48004   @ /
+/ DROP    0/0  tun0    udp   48004   @ /
+DROP    0/0  tun1    tcp   48004   @
+DROP    0/0  tun1    udp   48004   @
+DROP    0/0  tun2    tcp   48004   @
+DROP    0/0  tun2    udp   48004   @
+DROP    0/0  eth0    tcp   8080   @
+DROP    0/0  eth0    udp   8080   @
+/ DROP    0/0  tun0    tcp   8080   @ /
+/ DROP    0/0  tun0    udp   8080   @ /
+DROP    0/0  tun1    tcp   8080   @
+DROP    0/0  tun1    udp   8080   @
+DROP    0/0  tun2    tcp   8080   @
+DROP    0/0  tun2    udp   8080   @
+

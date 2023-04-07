@@ -1,0 +1,27 @@
+/
+####### FIREWALL OUTPUT #######################################################
+# TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com   #
+# Firewall output, abre servicios asequibles desde fuera:                     #
+#      <Dispositivo> <Protocolo> <Servicios> @                                #
+#      eth1 tcp    ftp  ftp-data             @                                #
+#      Permite el envio de paquetes para un ftp externo atraves de la tarjeta #
+#      eth1. No importa la ip del servidor externo.                           #
+###############################################################################
+/
+
+eth0    icmp    +   @
+eth0    tcp 0:65535 @
+eth0    udp 0:65535 @
+
+tun0    icmp    +   @
+tun0    tcp 0:65535 @
+tun0    udp 0:65535 @
+
+tun1    icmp    +   @
+tun1    tcp 0:65535 @
+tun1    udp 0:65535 @
+
+tun2    icmp    +   @
+tun2    tcp 0:65535 @
+tun2    udp 0:65535 @
+

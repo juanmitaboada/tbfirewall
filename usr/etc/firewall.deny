@@ -1,0 +1,33 @@
+/
+####### FIREWALL DENY #########################################################
+# TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com   #
+# Firewall deny impide el acceso a todos los servicios para para una          #
+# direccion ip determinada:                                                   #
+#  <Direccion IP> <Dispositivo>                                               #
+#  192.168.0.3  eth0                                                          #
+#  Impide el acceso a todos los servicios para la ip 192.168.0.3 en eth0      #
+###############################################################################
+/
+
+5.135.148.137   eth0
+50.202.230.114  eth0
+222.236.44.34   eth0
+222.252.29.2    eth0 / Scanner 20151127 FTP /
+188.138.61.44   eth0 / Scanner 20151205 EXIM-DOVECOT /
+93.174.95.119   eth0 / Scanner 20151205 EXIM /
+80.82.65.61     eth0 / Scanner 20150101 EXIM /
+146.185.239.5   eth0 / Scanner 20160114 EXIM /
+93.171.159.119  eth0 / Scanner 20160129 EXIM /
+89.248.171.131  eth0 / Scanner 20160208 EXIM /
+93.171.158.74   eth0 / Win 32TV Grunt   EXIM /
+193.189.117.247 eth0 / Scanner 20160208 EXIM /
+92.45.206.80    eth0 / Scanner 20160222 EXIM /
+185.130.5.160   eth0 / Scanner 20160203 EXIM /
+167.114.14.231  eth0 / Scanner 20160316 FTP /
+126.78.234.237  eth0 / Scanner 20160316 POP /
+175.138.65.121  eth0 / Scanner 20160316 POP /
+187.217.190.123 eth0 / Scanner 20160316 POP /
+82.138.62.75    eth0 / Scanner 20160316 FTP /
+46.161.40.200   eth0 / Scanner 20160316 EXIM /
+176.140.10.86   eth0 / Scanner 20160316 FTP /
+71.95.172.22    eth0 / Scanner 20160420 EXIM /

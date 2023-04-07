@@ -1,0 +1,14 @@
+/
+####### FIREWALL MASQ #########################################################
+# TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com   #
+# Firewall masq permite enmascara a la direcciones ip indicadas:              #
+#  <Direccion IP>                                                             #
+#  192.168.0.3  /Puesto03.interbyp.org/                                       #
+#  Se enmascara para que la direccion ip 192.168.0.3 pueda acceder a internet #
+###############################################################################
+/
+
+192.168.252.5	/ carmen.centrologic.com /
+/ 10.0.0.2 / 
+192.168.80.9
+192.168.80.13

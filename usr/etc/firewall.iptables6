@@ -1,0 +1,77 @@
+/
+####### FIREWALL IPTABLES #####################################################
+# TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com   #
+# Firewall ipchains controla el firewall a bajo nivel posibilitando aquellas  #
+# situaciones que no son posibles mediante la configuracion de tablas:        #
+#  <Comando>                                                                  #
+#  -A INPUT -p icmp -s 192.23.0.2 -d 192.23.0.1 -j DENY @                     #
+#  La direccion 192.23.0.2 no puede acceder ni ver a la direccion 192.23.0.1  #
+###############################################################################
+# Para hacer que un proxy que funciona en el puerto 8080 sea transparente     #
+# para los usuarios, tendremos que usar las siguientes reglas:                #
+# -A INPUT -i eth0 -p tcp -d 0/0 80 -j REDIRECT 8080 @                        #
+# -A INPUT -i eth1 -p tcp -d 0/0 80 -j REDIRECT 8080 @                        #
+###############################################################################
+/
+
+/ ### Default policy ### /
+-F @
+-P INPUT DROP @
+-P FORWARD DROP @
+-P OUTPUT DROP @
+
+-P INPUT ACCEPT @
+-P OUTPUT ACCEPT @
+
+/ ### Denegar paquetes ### ###################################################### /
+/ IMPORTANTE: Asegurar que estas reglas están al principio /
+/ === CIERRE === /
+-A INPUT -i eth0 -p tcp --dport 22 -j DROP @
+-A INPUT -i eth0 -p udp --dport 22 -j DROP @
+/ === APERTURA === /
+-A INPUT -i eth0 -p tcp --dport 1194 -j ACCEPT @
+-A INPUT -i eth0 -p udp --dport 1194 -j ACCEPT @
+
+/ # DENY ALL /
+-A INPUT -i eth0 -s 2a00:1838:2a:1500:225:90ff:fe67:5948 -j DROP @
+
+/ # Bloqueo por usuario: /
+/ # iptables -t filter -A OUTPUT -p tcp --dport <PORT:25600> --match owner --uid-owner <UUID:1004> -j DROP /
+
+-A INPUT -i eth0 -p tcp -s 0/0 --dport 3306 -j DROP @
+-A INPUT -i eth0 -p udp -s 0/0 --dport 3306 -j DROP @
+
+/ ### IPv6 ### ############################################### /
+-A INPUT -i eth0 -p ipv6-icmp -s 0/0 -j ACCEPT --icmpv6-type 0 @
+-A INPUT -i eth0 -p ipv6-icmp -s 0/0 -j ACCEPT --icmpv6-type 3 @
+-A INPUT -i eth0 -p ipv6-icmp -s 0/0 -j ACCEPT --icmpv6-type 5 @
+-A INPUT -i eth0 -p ipv6-icmp -s 0/0 -j ACCEPT --icmpv6-type 8 @
+-A INPUT -i eth0 -p ipv6-icmp -s 0/0 -j ACCEPT --icmpv6-type 11 @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport auth -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport domain -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport ftp -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport ftp-data -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport www -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport https -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport pop3 -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport smtp -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport pop3s -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport smtps -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport submission -j ACCEPT @
+-A INPUT -i eth0 -p tcp -s 0/0 --dport imaps -j ACCEPT @
+
+-A INPUT -i eth0 -p udp -s 0/0 --dport domain -j ACCEPT @
+-A INPUT -i eth0 -p udp -s 0/0 --dport www -j ACCEPT @
+-A INPUT -i eth0 -p udp -s 0/0 --dport https -j ACCEPT @
+-A INPUT -i eth0 -p udp -s 0/0 --dport pop3 -j ACCEPT @
+-A INPUT -i eth0 -p udp -s 0/0 --dport pop3s -j ACCEPT @
+-A INPUT -i eth0 -p udp -s 0/0 --dport submission -j ACCEPT @
+
+-A INPUT -i eth0 -p tcp -d 0/0 --dport 0:1023 -j DROP @
+-A INPUT -i eth0 -p udp -d 0/0 --dport 0:1023 -j DROP @
+-A INPUT -i eth0 -p tcp -d 0/0 --dport 1024:65535 -j ACCEPT @
+-A INPUT -i eth0 -p udp -d 0/0 --dport 1024:65535 -j ACCEPT @
+
+-A OUTPUT -o eth0 -p icmp -d 0/0 -j ACCEPT @
+-A OUTPUT -o eth0 -p tcp -d 0/0 -j ACCEPT @
+-A OUTPUT -o eth0 -p udp -d 0/0 -j ACCEPT @

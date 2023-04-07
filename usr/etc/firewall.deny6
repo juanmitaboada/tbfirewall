@@ -1,0 +1,13 @@
+/
+####### FIREWALL DENY #########################################################
+# TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com   #
+# Firewall deny impide el acceso a todos los servicios para para una          #
+# direccion ip determinada:                                                   #
+#  <Direccion IP> <Dispositivo>                                               #
+#  192.168.0.3  eth0                                                          #
+#  Impide el acceso a todos los servicios para la ip 192.168.0.3 en eth0      #
+###############################################################################
+/
+
+2a00:1838:20:2:0:0:f87e:f173   eth0 / Scanner 20160408 EXIM /
+

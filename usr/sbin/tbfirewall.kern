@@ -1,0 +1,1748 @@
+#!/bin/sh
+
+# I N T R A N E T   E   I N T E R N E T   ( 4 + 1   D I S P O S I T I V O S )
+
+# Descripcion de este archivo: Nucleo de TBFirewall v2.8
+#
+# TBFirewall.kern v3.1
+# Autor: Juanmi Taboada
+# Creado: 6 de marzo de 2000
+# Ultima actualizacion: 7 de Marzo de 2003
+# Correo electronico: juanmi@juanmitaboada.com
+# Pagina web: http://www.juanmitaboada.com
+#
+# Configuracion de direcciones Ilegales y Spoofing por defecto ACEPTAR
+# realizado por Santiago Gonzalez Herrero. Agosto (1999)
+#
+# Tablas de aceleracion de ftp y telnet, y control sobre puertos
+# especiales 1024 y 6000:6010 por Antonio Larrosa
+
+# Control de este Script para saltar ZONAS
+# COMANDO # Descripicion del comando (Bit por defecto)
+# IPTABLES
+  IPTABLES="1" # Permite ejecutar la zona de comandos de iptables (1)
+# LOOPBACK
+  LOCALHOSTPACK="1" # Permite loopback completamente transparente (1)
+# SPOOFING Y DIRECCIONES ILEGALES
+  # Los contenidos de esta sección se han incluido como opciones configurables en
+  # el fichero firewall.ips
+# DEVOLUCION DE PAQUETES (INPUT)
+  DEVOLUCIONIN="1" # Devuelve los paquetes icmp no aceptados y tambien devuelve
+                   # los paquetes de una subred con destino a esa subred (1)
+# ASEGURAMIENTO DE CIERRES DE PUERTOS
+  ASEGURAMIENTO="1" # Cerrar puertos ROOT y abrir puretos NO ROOT (1)
+# DEVOLUCION DE PAQUETES (SALIDA)
+  DEVOLUCIONOUT="1" # Devuelve los paquetes icmp no acpetados e impide que
+                    # salgan paquetes con destino a nuestra direccion ip (1)
+# OTROS
+  INTRAOUT="1" # Permite salir a los paquetes con destino a la red local (1)
+  REENVIO="1" # Posibilita el reenvio de paquetes (bit a 1 de ip_forward) (1)
+  MASQUERADING="1" # Activa las reglas de masquerading (1)
+# CONTROL INTERETHER
+  IOPACK="1" # Permite la entrada/salida con destino a otro lugar (1)
+# INFORMACION
+  # Los contenidos de esta sección se han incluido como opciones configurables en
+  # el fichero firewall.ips
+
+# Situacion de Archivos
+#                      - Iniciacion de TBFirewall -
+REALFIREWALL="/sbin/iptables"
+REALFIREWALL6="/sbin/ip6tables"
+IPSFILE="/usr/etc/firewall.ips"        # Localizacion del archivo de IPs
+INETIP=`cat $IPSFILE`              # Tabla de IPs
+#                       - Control Entrada/Salida -
+IPDENY=`cat /usr/etc/firewall.deny`    # Tabla de DENEGAR TODO IPs
+IPDENY6=`cat /usr/etc/firewall.deny6`      # Tabla de DENEGAR TODO IPs
+IPRETURN=`cat /usr/etc/firewall.return`    # Tabla de DEVOLVER TODO IPs
+IPACCEPT=`cat /usr/etc/firewall.accept`    # Tabla de ACEPTAR TODO IPs
+FIPTABLES=`cat /usr/etc/firewall.iptables` # Tabla de IPTABLES
+FIPTABLES6=`cat /usr/etc/firewall.iptables6` # Tabla de IPTABLES6
+IPCONTROL=`cat /usr/etc/firewall.control`  # Tabla de CONTROL de Servicios
+#                       - Control servicios permitidos -
+FIREWALLIN=`cat /usr/etc/firewall.input`   # Tabla de FIREWALL INPUT
+FIREWALLOUT=`cat /usr/etc/firewall.output` # Tabla de FIREWALL OUTPUT
+#                   - Interaccion con otras redes y usuarios -
+MASQ=`cat /usr/etc/firewall.masq`      # Tabla de ENMASCARAMIENTO
+FINTERETHER=`cat /usr/etc/firewall.ether`  # Tabla de INTERACION ETHERNET
+#                       - Banderas de control de estado -
+VARLOG=`cat /usr/etc/firewall.log`     # Si se va a loguear todo o no
+FIREWALLINET=`cat /usr/etc/firewall.inet`  # Si estamos o no conectados a INET
+
+# Libreria de funciones.
+. /etc/init.d/tbfirewall.functions
+
+# Asignaciones locales (Se obtienen mediante una carga automatica)
+PPP="CLEAR"
+ETH0="CLEAR"
+ETH1="CLEAR"
+ETH2="CLEAR"
+ETH3="CLEAR"
+LOG=""
+# Bloqueado por antiguedad
+#if [ ${VARLOG} = "1" ] ; then
+  # Loguear aquello que no este logueado
+  # LOG="-l"
+  # Bloqueado porque antiguamente el IPCHAINS lo permitía pero ahora
+  # no se permite, me reservo la posibilidad de usarlo para otra actividad
+  # en un futuro
+#fi
+
+# Direcciones
+LO="lo"
+LOOPBACK="127.0.0.1/32"
+CLASE_A="10.0.0.0/8"
+CLASE_B="172.16.0.0/16"
+CLASE_C="192.168.0.0/16"
+MULTICAST="240.0.0.0/3"
+BROADCAST_0="0.0.0.0"
+BROADCAST_1="255.255.255.255"
+TODAS="0.0.0.0/0"
+INETADDR=$IPLOCAL           # Absorve del entorno la Direccion IP
+                    # suplida por el propio conector.
+
+# Puertos Conocidos
+ROOT="0:1023"       # Puertos reservados a root
+NO_ROOT="1024:65535"    # Puertos no root
+
+# Lectura/Escritura de la direccion IP INTERNET y de la INTRANET
+count="6"
+count2="0"
+LINEA="A"
+FIPFILE="OK"
+INETIPNODISP="0"
+SPOOFING="1" # Proteccion contra spoofing y direcciones ilegales (1)
+BROADCASTPROTECTION="1" # Indica si proteger o no el BROADCAST (1)
+TRANSPARENTSERVER="0" # Hacer transparente los destinos al server (0)
+INFO="0" # Informacion (1)
+for VARINET in $INETIP ; do
+  case $VARINET in
+  /) # Linea comentada
+    if [ ${LINEA} = "A" ] ; then
+      LINEA="D"
+    else
+      LINEA="A"
+    fi
+  ;;
+  *)
+    if [ ${LINEA} = "A" ] ; then # Indice para indicar que dispositivo es.
+  case $VARINET in
+      I) # El dispositivo de esa linea es el de Internet
+          count="0"
+      ;;
+      E) # Vamos a tratar con un dispositivo ethernet (Intranet)
+          count="2"
+      ;;
+      L) # Datos de la red local general (todos los dispositivos)
+          count="6"
+      ;;
+      SPOOFING) # Protección contra spoofing y direcciones ilegales (1)
+          count="7"
+      ;;
+      BROADCASTPROTECTION) # Indica si proteger o no el BROADCAST (1)
+          count="8"
+      ;;
+      TRANSPARENTSERVER) # Hacer transparente el DNS para todos los accesos (0)
+          count="9"
+      ;;
+      INFORMADOR) # Mostrar información acerca de la configuración
+          count="10"
+      ;;
+      *)
+    case $count in
+    0) # Lee la direccion IP
+      case $INETIPNODISP in
+        0) INETIPNODISP="1"
+    ;;
+    1) FIPFILE="BAD"
+      esac
+      INETIPADDR=$VARINET
+      count="1"
+    ;;
+    1) # Lee el dispositivo
+      INETDISP=$VARINET
+      count="2"
+    ;;
+    2) # Lee las direccion IP de la Intranet
+      case $count2 in
+        0) # IP0 de ETH0
+      IP0=$VARINET
+    ;;
+    1) # IP1 de ETH1
+      IP1=$VARINET
+    ;;
+    2) # IP2 de ETH2
+      IP2=$VARINET
+    ;;
+    3) # IP3 de ETH3
+      IP3=$VARINET
+    ;;
+    4) # No hay mas dispositivos ERROR
+      FIPFILE="BAD"
+      esac
+    count="3"
+    ;;
+    3) # Lee el dispositivo de dicha IP
+      case $count2 in
+        0) # ETH0
+      ETH0=$VARINET
+    ;;
+        1) # ETH1
+      ETH1=$VARINET
+    ;;
+    2) # ETH2
+      ETH2=$VARINET
+    ;;
+    3) # ETH3
+      ETH3=$VARINET
+    ;;
+    4) # No hay mas dispositivos ERROR
+      FIPFILE="BAD"
+      esac
+    count="4"
+    ;;
+    4) # Lee los datos de la red local por dispositivos (LOCALNET*)
+      case $count2 in
+        0) # LOCALNET0
+      LOCALNET0=$VARINET
+    ;;
+        1) # LOCALNET1
+      LOCALNET1=$VARINET
+    ;;
+    2) # LOCALNET2
+      LOCALNET2=$VARINET
+    ;;
+    3) # LOCALNET3
+      LOCALNET3=$VARINET
+    ;;
+    4) # No hay mas dispositivos ERROR
+      FIPFILE="BAD"
+      esac
+    count="5"
+    ;;
+    5) # Lee los datos de la red local por dispositivos (BROADCAST*)
+      case $count2 in
+        0) # BROADCAST0
+      BROADCAST0=$VARINET
+      count2="1"
+    ;;
+        1) # BROADCAST1
+      BROADCAST1=$VARINET
+      count2="2"
+    ;;
+    2) # BROADCAST2
+      BROADCAST2=$VARINET
+      count2="3"
+    ;;
+    3) # BROADCAST3
+      BROADCAST3=$VARINET
+      count2="4"
+    ;;
+    4) # No hay mas dispositivos ERROR
+      FIPFILE="BAD"
+      esac
+    count="2"
+    ;;
+    6) # Lee los datos de la red local general (LOCALNET)
+      LOCALNET=$VARINET
+    count="2"
+    ;;
+    7) # Proteccion contra spoofing y direcciones ilegales (1)
+      SPOOFING=$VARINET
+    count="2"
+    ;;
+    8) # Indica si proteger o no el BROADCAST (1)
+      BROADCASTPROTECTION=$VARINET
+    count="2"
+    ;;
+    9) # Hacer transparente el DNS para todos los accesos (0)  [Puede valer 0, 1 o 2]
+      TRANSPARENTSERVER=$VARINET
+    count="2"
+    ;;
+    10) # Mostrar información acerca de la configuración (1)
+      INFO=$VARINET
+    count="2"
+    esac
+  esac
+  fi
+  esac
+done
+# El proximo if junto con el siguiente parece codigo redundante, pero no lo
+# es porque se sale del programa si: FIPFILE="BAD" o si se ha sobrepasado la
+# cuenta de dispositivos
+if [ ${FIPFILE} = "BAD" ] ; then
+  count="6"
+fi
+if [ ${count} = "6" ] ; then
+  echo "TBFirewall.ker: El archivo de IPs esta mal configurado o se ha"
+  echo "excedido el numero maximo de dispositivos..."
+  exit 1
+fi
+LINEA="A"
+if [ ${FIREWALLINET} = "1" ] ; then
+if [ -z ${INETADDR} ] ; then
+  # Se actualiza la variable de memoria por la IP del archivo de configuracion
+  INETADDR=${INETIPADDR}
+else
+  # INETADDR contiene la nueva direccion IP, se actualiza la del archivo
+  DATARCHIPS=`cat $IPSFILE`
+  echo -n "" > $IPSFILE
+  count="0"
+  for VARACTIPS in $DATARCHIPS ; do
+    case $VARACTIPS in
+    /) # Linea comentada
+      if [ ${LINEA} = "A" ] ; then
+        LINEA="D"
+        echo -n "$VARACTIPS " >> $IPSFILE
+      else
+        LINEA="A"
+        echo "$VARACTIPS" >> $IPSFILE
+      fi
+    ;;
+    *)
+    if [ ${LINEA} = "A" ] ; then
+    case $count in
+      0) # Tipo de dispositivo (LOCAL/ETHERNET/INTERNET)
+        echo -n "$VARACTIPS " >> $IPSFILE
+        ESINET=$VARACTIPS
+        count="1"
+      ;;
+      1) # Direccion IP
+    case $ESINET in
+      I)
+        # La direccion IP ha de ser modificada por la nueva direccion
+        echo -n "$INETADDR  " >> $IPSFILE
+        count="2"
+      ;;
+      E)
+        # Es un dispositivo ETHERNET, se copiaran los datos.
+        echo -n "$VARACTIPS " >> $IPSFILE
+        count="2"
+      ;;
+      L)
+        # Es un dispositivo LOCALNET, se copiaran los datos.
+        echo -n "$VARACTIPS " >> $IPSFILE
+        echo "" >> $IPSFILE
+        count="0"
+    esac
+      ;;
+      2) # Nombre del dispositivo
+        echo -n "$VARACTIPS" >> $IPSFILE
+    case $ESINET in
+      I)
+        echo "" >> $IPSFILE
+        count="0"
+      ;;
+      E)
+        count="3"
+    esac
+      ;;
+      3) # Datos para las redes locales
+        echo -n "   $VARACTIPS" >> $IPSFILE
+    count="4"
+      ;;
+      4) # Datos para los broadcast
+        echo -n "   $VARACTIPS" >> $IPSFILE
+        echo "" >> $IPSFILE
+    count="0"
+    esac
+    else
+      # Copiamos los comentarios
+      echo -n "$VARACTIPS " >> $IPSFILE
+    fi
+    esac
+  done
+fi
+PPP=$INETDISP
+fi
+
+
+# ------------> COMENZAMOS <---------- #
+
+# Limpiamos las reglas anteriores
+
+$REALFIREWALL -F
+$REALFIREWALL -t nat -F
+
+# Establecemos las politicas por defecto
+
+$REALFIREWALL -P INPUT DROP
+$REALFIREWALL -P FORWARD DROP
+$REALFIREWALL -P OUTPUT DROP
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>>>>>>> DENEGAR TODO <<<<<<<<<<<<<<<<<<<<<<<<<<<
+# ###############################################################
+count="0"
+LINEA="A"
+for VARDRA in $IPDENY ; do
+  case $VARDRA in
+  /) # Linea comentada
+    if [ ${LINEA} = "A" ] ; then
+      LINEA="D"
+    else
+      LINEA="A"
+    fi
+  ;;
+  *)
+    if [ ${LINEA} = "A" ] ; then
+    case $count in
+      0) # Obtenemos la direccion IP
+      IPUSUARIO=$VARDRA
+      count="1"
+      ;;
+      1) # Obtenemos el dispositivo
+      DISPOSITIVO=$VARDRA
+      count="0"
+      if [[ $INFO == "1" ]] ; then
+        echo ""
+        echo -n "-x DENEGADO: $IPUSUARIO en $DISPOSITIVO"
+      fi
+      $REALFIREWALL -A INPUT -i $DISPOSITIVO -s $IPUSUARIO -d 0/0 -j DROP $LOG
+    esac
+    fi
+  esac
+done
+# IDEM for IPv6
+count="0"
+LINEA="A"
+for VARDRA in $IPDENY6 ; do
+  case $VARDRA in
+  /) # Linea comentada
+    if [ ${LINEA} = "A" ] ; then
+      LINEA="D"
+    else
+      LINEA="A"
+    fi
+  ;;
+  *)
+    if [ ${LINEA} = "A" ] ; then
+    case $count in
+      0) # Obtenemos la direccion IP
+      IPUSUARIO=$VARDRA
+      count="1"
+      ;;
+      1) # Obtenemos el dispositivo
+      DISPOSITIVO=$VARDRA
+      count="0"
+      if [[ $INFO == "1" ]] ; then
+        echo ""
+        echo -n "-x DENEGADO: $IPUSUARIO en $DISPOSITIVO"
+      fi
+      $REALFIREWALL6 -A INPUT -i $DISPOSITIVO -s $IPUSUARIO -d 0/0 -j DROP $LOG
+    esac
+    fi
+  esac
+done
+
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>>>>>>> DEVOLVER TODO <<<<<<<<<<<<<<<<<<<<<<<<<<
+# ###############################################################
+count="0"
+LINEA="A"
+for VARDRA in $IPRETURN ; do
+  case $VARDRA in
+  /) # Linea comentada
+    if [ ${LINEA} = "A" ] ; then
+      LINEA="D"
+    else
+      LINEA="A"
+    fi
+  ;;
+  *)
+    if [ ${LINEA} = "A" ] ; then
+      case $count in
+        0) # Obtenemos la direccion IP
+        IPUSUARIO=$VARDRA
+        count="1"
+        ;;
+        1) # Obtenemos el dispositivo
+        DISPOSITIVO=$VARDRA
+        count="0"
+    if [[ $INFO == "1" ]] ; then
+          echo ""
+          echo -n "<- DEVUELTO: $IPUSUARIO en $DISPOSITIVO"
+    fi
+        $REALFIREWALL -A INPUT -i $DISPOSITIVO -s $IPUSUARIO -d 0/0 -j REJECT $LOG
+      esac
+    fi
+  esac
+done
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>>>>>> ACCEPTAR TODO <<<<<<<<<<<<<<<<<<<<<<<<<<<
+# ###############################################################
+count="0"
+LINEA="A"
+for VARDRA in $IPACCEPT ; do
+  case $VARDRA in
+  /) # Linea comentada
+    if [ ${LINEA} = "A" ] ; then
+      LINEA="D"
+    else
+      LINEA="A"
+    fi
+  ;;
+  *)
+    if [ ${LINEA} = "A" ] ; then
+      case $count in
+        0) # Obtenemos la direccion IP
+        IPUSUARIO=$VARDRA
+        count="1"
+        ;;
+        1) # Obtenemos el dispositivo
+        DISPOSITIVO=$VARDRA
+        count="0"
+    if [[ $INFO == "1" ]] ; then
+          echo ""
+          echo -n "-> ACEPTADO: $IPUSUARIO en $DISPOSITIVO"
+    fi
+        $REALFIREWALL -A INPUT -i $DISPOSITIVO -s $IPUSUARIO -d 0/0 -j ACCEPT $LOG
+      esac
+    fi
+  esac
+done
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>>>>>>>>>> IPTABLES <<<<<<<<<<<<<<<<<<<<<<<<<<<<
+# ###############################################################
+# Permite introducir cualquier tipo de regla usando los parametros normales
+if [ ${IPTABLES} = "1" ] ; then
+LINEA="A"
+  echo "" > /tmp/firewall.tmp
+  for VARIPTABLES in $FIPTABLES ; do
+    case $VARIPTABLES in
+    /) # Linea comentada
+      if [ ${LINEA} = "A" ] ; then
+        LINEA="D"
+      else
+        LINEA="A"
+      fi
+    ;;
+    *)
+      if [ ${LINEA} = "A" ] ; then
+        case $VARIPTABLES in
+        @) # Fin de linea, ejecuta el comando
+       if [[ $INFO == "1" ]] ; then
+         echo ""
+         echo -n "!! Regla insertada: $REALFIREWALL" `cat /tmp/firewall.tmp` ""
+       fi
+           $REALFIREWALL `cat /tmp/firewall.tmp`
+           echo "" > /tmp/firewall.tmp
+        ;;
+        *) # Prepara el comando para ser ejecutado
+           echo -n "$VARIPTABLES " >> /tmp/firewall.tmp
+        esac
+      fi
+    esac
+  done
+  rm -f /tmp/firewall.tmp
+fi
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>>>>>>>>>> IP6TABLES <<<<<<<<<<<<<<<<<<<<<<<<<<<
+# ###############################################################
+# Permite introducir cualquier tipo de regla usando los parametros normales
+if [ ${IPTABLES} = "1" ] ; then
+LINEA="A"
+  echo "" > /tmp/firewall.tmp
+  for VARIPTABLES in $FIPTABLES6 ; do
+    case $VARIPTABLES in
+    /) # Linea comentada
+      if [ ${LINEA} = "A" ] ; then
+        LINEA="D"
+      else
+        LINEA="A"
+      fi
+    ;;
+    *)
+      if [ ${LINEA} = "A" ] ; then
+        case $VARIPTABLES in
+        @) # Fin de linea, ejecuta el comando
+       if [[ $INFO == "1" ]] ; then
+         echo ""
+         echo -n "!! Regla insertada: $REALFIREWALL6" `cat /tmp/firewall.tmp` ""
+       fi
+           $REALFIREWALL6 `cat /tmp/firewall.tmp`
+           echo "" > /tmp/firewall.tmp
+        ;;
+        *) # Prepara el comando para ser ejecutado
+           echo -n "$VARIPTABLES " >> /tmp/firewall.tmp
+        esac
+      fi
+    esac
+  done
+  rm -f /tmp/firewall.tmp
+fi
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>>>>>>>>>> LOOPBACK <<<<<<<<<<<<<<<<<<<<<<<<<<<<
+# ###############################################################
+
+# --------------->>>>>>>>>>> INPUT <<<<<<<<<<<<<<----------------
+
+if [ ${LOCALHOSTPACK} = "1" ] ; then
+# Aceptar paquetes de la propia maquina con origen y destino 127.0.0.1
+$REALFIREWALL -A INPUT -i $LO -s $LOOPBACK -d $LOOPBACK -j ACCEPT $LOG
+if [ ${TRANSPARENTSERVER} = "1" ] ; then
+  $REALFIREWALL -A INPUT -i $LO -s $INETADDR -d $INETADDR -j ACCEPT $LOG
+fi
+
+# --------------->>>>>>>>>>> OUTPUT <<<<<<<<<<<<<<----------------
+
+# Permite salir paquetes de la propia maquina con origen y destino 127.0.0.1
+$REALFIREWALL -A OUTPUT -o $LO -s $LOOPBACK -d $LOOPBACK -j ACCEPT $LOG
+if [ ${TRANSPARENTSERVER} = "1" ] ; then
+  $REALFIREWALL -A OUTPUT -o $LO -s $INETADDR -d $INETADDR -j ACCEPT $LOG
+fi
+fi
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>> TABLAS DE CONTROL DE PETICIONES <<<<<<<<<<<<<<<<
+# ###############################################################
+
+# Realiza un control exaustivo de los servicios permitidos a cada IP
+count="0"
+STATUS="DROP"
+LINEA="A"
+for VARCONTROL in $IPCONTROL ; do
+  case $VARCONTROL in
+  /) # Linea comentada
+    if [ ${LINEA} = "A" ] ; then
+      LINEA="D"
+    else
+      LINEA="A"
+    fi
+  ;;
+  *)
+    if [ ${LINEA} = "A" ] ; then
+      case $count in
+      0) # Obtenemos si se va a aceptar o genegar
+      STATUS=$VARCONTROL
+      count="1"
+      ;;
+      1) # Obtenemos la direccion IP origen
+      IPUSUARIO=$VARCONTROL
+      count="2"
+      ;;
+      2) # Obtenemos el dispositivo
+      DISPOSITIVO=$VARCONTROL
+      count="3"
+      ;;
+      *) # Comprobamos el tipo de paquete y de servicio
+        case $VARCONTROL in
+    tcp) # Comprobamos si el tipo de paquetes que vamos a trabajar es tcp
+      PROTOCOLO="tcp"
+    ;;
+    udp) # Comprobamos si el tipo de paquetes que vamos a trabajar es udp
+      PROTOCOLO="udp"
+    ;;
+    icmp) # Comprobamos si el tipo de paquetes que vamos a trabajar es udp
+      PROTOCOLO="icmp"
+    ;;
+        @) # Comprobamos si no hay mas servicios
+          count="0"
+        ;;
+        *) # Cerramos el servicio en cuestion
+      case $PROTOCOLO in
+        icmp) # Para el protocolo icmp la regla cambia un poquito
+            if [ ${VARCONTROL} = "+" ] ; then
+        $REALFIREWALL -A INPUT -i $DISPOSITIVO -p $PROTOCOLO -s $IPUSUARIO -d 0/0 -j $STATUS $LOG
+        else
+        $REALFIREWALL -A INPUT -i $DISPOSITIVO -p $PROTOCOLO -s $IPUSUARIO -d 0/0 -j $STATUS --icmp-type $VARCONTROL $LOG
+        fi
+        ;;
+        *) # Para los otros protocolos
+            $REALFIREWALL -A INPUT -i $DISPOSITIVO -p $PROTOCOLO -s $IPUSUARIO -d 0/0 --dport $VARCONTROL -j $STATUS $LOG
+      esac
+    esac
+  esac
+  fi
+  esac
+done
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>>>>> CONTROL INTERETHER <<<<<<<<<<<<<<<<<<<<<<<
+# ###############################################################
+
+# Tiene que estar antes de SPOOFING porque si no los paquetes aunque
+# serían transmitidos sin problemas, también serían logueados
+
+if [ ${IOPACK} = "1" ] ; then
+# Ejecucion de las tablas de interacion entre tarjetas de red
+count="0"
+LINEA="A"
+for DATO in $FINTERETHER ; do
+  case $DATO in
+  /) # Linea comentada
+    if [ ${LINEA} = "A" ] ; then
+      LINEA="D"
+    else
+      LINEA="A"
+    fi
+  ;;
+  *)
+    if [ ${LINEA} = "A" ] ; then
+    case $count in
+    0) # Leemos el Estado
+    STATUS=$DATO
+    count="1"
+    ;;
+    1) # Leemos el origen de los paquetes
+    DORIG=$DATO
+    case $DATO in
+      $ETH0)
+        ORIG=$LOCALNET0
+      ;;
+      $ETH1)
+        ORIG=$LOCALNET1
+      ;;
+      $ETH2)
+        ORIG=$LOCALNET2
+      ;;
+      $ETH3)
+        ORIG=$LOCALNET3
+    esac
+    count="2"
+    ;;
+    2) # Leemos el destino de los paquetes
+    case $DATO in
+      $ETH0)
+        DEST=$LOCALNET0
+      ;;
+      $ETH1)
+        DEST=$LOCALNET1
+      ;;
+      $ETH2)
+        DEST=$LOCALNET2
+      ;;
+      $ETH3)
+        DEST=$LOCALNET3
+    esac
+    count="3"
+    ;;
+    3) # Leemos el tipo de paquete y de servicio
+    case $DATO in
+    tcp) # Protocolo TCP
+    PROTO="tcp"
+    ;;
+    udp) # Protocolo UDP
+    PROTO="udp"
+    ;;
+    icmp) # Protocolo ICMP
+    PROTO="icmp"
+    ;;
+    @) # Fin de la linea
+    count="0"
+    ;;
+    *) # Procesamos el servicio
+      case $PROTO in
+        icmp) # Regla especial para los paquetes ICMP
+          if [ ${DATO} = "+" ] ; then # Todos los ICMP con opcion +
+            $REALFIREWALL -A INPUT -i $DORIG -p $PROTO -s $ORIG -d $DEST -j $STATUS $LOG
+            $REALFIREWALL -A FORWARD -i $DORIG -p $PROTO -s $ORIG -d $DEST -j $STATUS $LOG
+          else # Solo los tipos seleccionados de ICMP
+            $REALFIREWALL -A INPUT -i $DORIG -p $PROTO -s $ORIG -d $DEST -j $STATUS --icmp-type $DATO $LOG
+            $REALFIREWALL -A FORWARD -i $DORIG -p $PROTO -s $ORIG -d $DEST -j $STATUS --icmp-type $DATO $LOG
+          fi
+        ;;
+        *) # Regla normal para otros paquetes
+              $REALFIREWALL -A INPUT -i $DORIG -p $PROTO -s $ORIG -d $DEST --dport $DATO -j $STATUS $LOG
+              $REALFIREWALL -A FORWARD -i $DORIG -p $PROTO -s $ORIG -d $DEST --dport $DATO -j $STATUS $LOG
+        esac
+        esac
+    esac
+    fi
+    esac
+done
+fi
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>> SPOOFING Y DIRECCIONES ILEGALES <<<<<<<<<<<<<<<<
+# ###############################################################
+
+if [ ${SPOOFING} = "1" ] ; then
+# Logeo contra spoofing y direcciones ilegales de Internet
+if [ ${PPP} != "CLEAR" ] ; then
+  # Paquetes de fuera con la propia IP
+  $REALFIREWALL -A INPUT -i $PPP -s $INETADDR -j LOG
+  $REALFIREWALL -A INPUT -i $PPP -s $INETADDR -j DROP
+
+  # Paquetes de fuera con origen o destino 127.0.0.1/32
+  $REALFIREWALL -A INPUT -i $PPP -s $LOOPBACK -j LOG
+  $REALFIREWALL -A INPUT -i $PPP -s $LOOPBACK -j DROP
+  $REALFIREWALL -A INPUT -i $PPP -d $LOOPBACK -j LOG
+  $REALFIREWALL -A INPUT -i $PPP -d $LOOPBACK -j DROP
+
+  # Paquetes de broadcast que vienen de fuera
+  $REALFIREWALL -A INPUT -i $PPP -s $BROADCAST_0 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $PPP -d $BROADCAST_0 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $PPP -s $BROADCAST_1 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $PPP -d $BROADCAST_1 -j DROP $LOG
+
+  # Paquetes de fuera con IPs ya designadas a esta maquina
+  $REALFIREWALL -A INPUT -i $PPP -s $LOCALNET -j LOG
+  $REALFIREWALL -A INPUT -i $PPP -s $LOCALNET -j DROP
+
+  # IntraProtect: Paquetes de fuera con destinos de nuestra red
+    $REALFIREWALL -A INPUT -i $PPP -d $LOCALNET -j LOG
+    $REALFIREWALL -A INPUT -i $PPP -d $LOCALNET -j DROP
+fi
+
+# Logeo contra spoofing y direcciones ilegales de la Intranet (ETH0)
+if [ ${ETH0} != "CLEAR" ] ; then
+  # Paquetes de fuera con la propia IP
+  if [ ${BROADCASTPROTECTION} = "1" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -s $IP0 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -s $IP0 -j DROP
+  fi
+
+  # Paquetes de fuera con origen o destino 127.0.0.1/32
+  $REALFIREWALL -A INPUT -i $ETH0 -s $LOOPBACK -j LOG
+  $REALFIREWALL -A INPUT -i $ETH0 -s $LOOPBACK -j DROP
+  $REALFIREWALL -A INPUT -i $ETH0 -d $LOOPBACK -j LOG
+  $REALFIREWALL -A INPUT -i $ETH0 -d $LOOPBACK -j DROP
+
+  # Paquetes de broadcast que vienen de fuera
+  $REALFIREWALL -A INPUT -i $ETH0 -s $BROADCAST_0 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH0 -d $BROADCAST_0 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH0 -s $BROADCAST_1 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH0 -d $BROADCAST_1 -j DROP $LOG
+  if [ ${BROADCASTPROTECTION} = "1" ] ; then
+  if [ ${ETH0} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -s $BROADCAST0  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -d $BROADCAST0  -j DROP $LOG
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -s $BROADCAST1  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -d $BROADCAST1  -j DROP $LOG
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -s $BROADCAST2  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -d $BROADCAST2  -j DROP $LOG
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -s $BROADCAST3  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -d $BROADCAST3  -j DROP $LOG
+  fi
+  fi
+
+  # Paquetes de fuera con IPs ya designadas a esta maquina
+  if [ ${PPP} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -s $INETADDR -j LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -s $INETADDR -j DROP
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -s $IP1 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -s $IP1 -j DROP
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -s $IP2 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -s $IP2 -j DROP
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -s $IP3 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -s $IP3 -j DROP
+  fi
+
+  # IntraProtect: Paquetes con destinos de la maquina para evitar firewall
+  if [ ${PPP} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} = "0" ] ; then
+      $REALFIREWALL -A INPUT -i $ETH0 -d $INETADDR -j LOG
+      $REALFIREWALL -A INPUT -i $ETH0 -d $INETADDR -j DROP
+    fi
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -d $IP1 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -d $IP1 -j DROP
+    fi
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -d $IP2 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -d $IP2 -j DROP
+    fi
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH0 -d $IP3 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -d $IP3 -j DROP
+    fi
+  fi
+fi
+
+# Logeo contra spoofing y direcciones ilegales de la Intranet (ETH1)
+if [ ${ETH1} != "CLEAR" ] ; then
+  # Paquetes de fuera con la propia IP
+  if [ ${BROADCASTPROTECTION} = "1" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -s $IP1 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -s $IP1 -j DROP
+  fi
+
+  # Paquetes de fuera con origen o destino 127.0.0.1/32
+  $REALFIREWALL -A INPUT -i $ETH1 -s $LOOPBACK -j LOG
+  $REALFIREWALL -A INPUT -i $ETH1 -s $LOOPBACK -j DROP
+  $REALFIREWALL -A INPUT -i $ETH1 -d $LOOPBACK -j LOG
+  $REALFIREWALL -A INPUT -i $ETH1 -d $LOOPBACK -j DROP
+
+  # Paquetes de broadcast que vienen de fuera
+  $REALFIREWALL -A INPUT -i $ETH1 -s $BROADCAST_0 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH1 -d $BROADCAST_0 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH1 -s $BROADCAST_1 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH1 -d $BROADCAST_1 -j DROP $LOG
+  if [ ${BROADCASTPROTECTION} = "1" ] ; then
+  if [ ${ETH0} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -s $BROADCAST0  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -d $BROADCAST0  -j DROP $LOG
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -s $BROADCAST1  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -d $BROADCAST1  -j DROP $LOG
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -s $BROADCAST2  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -d $BROADCAST2  -j DROP $LOG
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -s $BROADCAST3  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -d $BROADCAST3  -j DROP $LOG
+  fi
+  fi
+
+  # Paquetes de fuera con IPs ya designadas a esta maquina
+  if [ ${PPP} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -s $INETADDR -j LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -s $INETADDR -j DROP
+  fi
+  if [ ${ETH0} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -s $IP0 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -s $IP0 -j DROP
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -s $IP2 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -s $IP2 -j DROP
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -s $IP3 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -s $IP3 -j DROP
+  fi
+
+  # IntraProtect: Paquetes con destinos de la maquina para evitar firewall
+  if [ ${PPP} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} = "0" ] ; then
+      $REALFIREWALL -A INPUT -i $ETH1 -d $INETADDR -j LOG
+      $REALFIREWALL -A INPUT -i $ETH1 -d $INETADDR -j DROP
+    fi
+  fi
+  if [ ${ETH0} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -d $IP0 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -d $IP0 -j DROP
+    fi
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -d $IP2 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -d $IP2 -j DROP
+    fi
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH1 -d $IP3 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -d $IP3 -j DROP
+    fi
+  fi
+fi
+
+# Logeo contra spoofing y direcciones ilegales de la Intranet (ETH2)
+if [ ${ETH2} != "CLEAR" ] ; then
+  # Paquetes de fuera con la propia IP
+  if [ ${BROADCASTPROTECTION} = "1" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -s $IP2 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -s $IP2 -j DROP
+  fi
+
+  # Paquetes de fuera con origen o destino 127.0.0.1/32
+  $REALFIREWALL -A INPUT -i $ETH2 -s $LOOPBACK -j LOG
+  $REALFIREWALL -A INPUT -i $ETH2 -s $LOOPBACK -j DROP
+  $REALFIREWALL -A INPUT -i $ETH2 -d $LOOPBACK -j LOG
+  $REALFIREWALL -A INPUT -i $ETH2 -d $LOOPBACK -j DROP
+
+  # Paquetes de broadcast que vienen de fuera
+  $REALFIREWALL -A INPUT -i $ETH2 -s $BROADCAST_0 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH2 -d $BROADCAST_0 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH2 -s $BROADCAST_1 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH2 -d $BROADCAST_1 -j DROP $LOG
+  if [ ${BROADCASTPROTECTION} = "1" ] ; then
+  if [ ${ETH0} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -s $BROADCAST0  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -d $BROADCAST0  -j DROP $LOG
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -s $BROADCAST1  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -d $BROADCAST1  -j DROP $LOG
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -s $BROADCAST2  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -d $BROADCAST2  -j DROP $LOG
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -s $BROADCAST3  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -d $BROADCAST3  -j DROP $LOG
+  fi
+  fi
+
+  # Paquetes de fuera con IPs ya designadas a esta maquina
+  if [ ${PPP} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -s $INETADDR -j LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -s $INETADDR -j DROP
+  fi
+  if [ ${ETH0} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -s $IP0 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -s $IP0 -j DROP
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -s $IP1 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -s $IP1 -j DROP
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -s $IP3 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -s $IP3 -j DROP
+  fi
+
+  # IntraProtect: Paquetes con destinos de la maquina para evitar firewall
+  if [ ${PPP} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} = "0" ] ; then
+      $REALFIREWALL -A INPUT -i $ETH2 -d $INETADDR -j LOG
+      $REALFIREWALL -A INPUT -i $ETH2 -d $INETADDR -j DROP
+    fi
+  fi
+  if [ ${ETH0} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -d $IP0 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -d $IP0 -j DROP
+    fi
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -d $IP1 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -d $IP1 -j DROP
+    fi
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH2 -d $IP3 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -d $IP3 -j DROP
+    fi
+  fi
+fi
+
+# Logeo contra spoofing y direcciones ilegales de la Intranet (ETH3)
+if [ ${ETH3} != "CLEAR" ] ; then
+  # Paquetes de fuera con la propia IP
+  if [ ${BROADCASTPROTECTION} = "1" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -s $IP3 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -s $IP3 -j DROP
+  fi
+
+  # Paquetes de fuera con origen o destino 127.0.0.1/32
+  $REALFIREWALL -A INPUT -i $ETH3 -s $LOOPBACK -j LOG
+  $REALFIREWALL -A INPUT -i $ETH3 -s $LOOPBACK -j DROP
+  $REALFIREWALL -A INPUT -i $ETH3 -d $LOOPBACK -j LOG
+  $REALFIREWALL -A INPUT -i $ETH3 -d $LOOPBACK -j DROP
+
+  # Paquetes de broadcast que vienen de fuera
+  $REALFIREWALL -A INPUT -i $ETH3 -s $BROADCAST_0 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH3 -d $BROADCAST_0 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH3 -s $BROADCAST_1 -j DROP $LOG
+  $REALFIREWALL -A INPUT -i $ETH3 -d $BROADCAST_1 -j DROP $LOG
+  if [ ${BROADCASTPROTECTION} = "1" ] ; then
+  if [ ${ETH0} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -s $BROADCAST0  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -d $BROADCAST0  -j DROP $LOG
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -s $BROADCAST1  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -d $BROADCAST1  -j DROP $LOG
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -s $BROADCAST2  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -d $BROADCAST2  -j DROP $LOG
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -s $BROADCAST3  -j DROP $LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -d $BROADCAST3  -j DROP $LOG
+  fi
+  fi
+
+  # Paquetes de fuera con IPs ya designadas a esta maquina
+  if [ ${PPP} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -s $INETADDR -j LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -s $INETADDR -j DROP
+  fi
+  if [ ${ETH0} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -s $IP0 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -s $IP0 -j DROP
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -s $IP1 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -s $IP1 -j DROP
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -s $IP2 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -s $IP2 -j DROP
+  fi
+
+  # IntraProtect: Paquetes con destinos de la maquina para evitar firewall
+  if [ ${PPP} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} = "0" ] ; then
+      $REALFIREWALL -A INPUT -i $ETH3 -d $INETADDR -j LOG
+      $REALFIREWALL -A INPUT -i $ETH3 -d $INETADDR -j DROP
+    fi
+  fi
+  if [ ${ETH0} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -d $IP0 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -d $IP0 -j DROP
+    fi
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -d $IP1 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -d $IP1 -j DROP
+    fi
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    if [ ${TRANSPARENTSERVER} != "2" ] ; then
+    $REALFIREWALL -A INPUT -i $ETH3 -d $IP2 -j LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -d $IP2 -j DROP
+    fi
+  fi
+fi
+fi
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>>> TABLAS DE FIREWALL INPUT <<<<<<<<<<<<<<<<<<<
+# ###############################################################
+
+# Procesamos la tabla del firewall
+count="0"
+ICMPINP="0"
+ICMPIN0="0"
+ICMPIN1="0"
+ICMPIN2="0"
+ICMPIN3="0"
+LINEA="A"
+for DATO in $FIREWALLIN ; do
+  case $DATO in
+  /) # Linea comentada
+    if [ ${LINEA} = "A" ] ; then
+      LINEA="D"
+    else
+      LINEA="A"
+    fi
+  ;;
+  *)
+    if [ ${LINEA} = "A" ] ; then
+      case $count in
+      0) # Leemos el dispositivo
+          count="1"
+      DISP=$DATO
+      ;;
+      1) # Leemos el tipo de paquete y de servicio
+    case $DATO in
+      tcp) # Protocolo TCP
+      PROTO="tcp"
+    ;;
+        udp) # Protocolo UDP
+      PROTO="udp"
+    ;;
+    icmp) # Protocolo ICMP
+      PROTO="icmp"
+    ;;
+    @) # Fin de la linea
+      count="0"
+    ;;
+    *) # Procesamos el servicio
+      case $PROTO in
+        icmp) # Regla especial para los paquetes ICMP
+        case $DISP in
+        $PPP)
+          if [ ${DATO} = "+" ] ; then
+          ICMPINP="1"
+          $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $INETADDR -j ACCEPT $LOG
+          else
+          $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $INETADDR -j ACCEPT --icmp-type $DATO $LOG
+          fi
+        ;;
+        $ETH0)
+          if [ ${DATO} = "+" ] ; then
+          ICMPIN0="1"
+          $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP0 -j ACCEPT $LOG
+          else
+          $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP0 -j ACCEPT --icmp-type $DATO $LOG
+          fi
+        ;;
+        $ETH1)
+          if [ ${DATO} = "+" ] ; then
+          ICMPIN1="1"
+          $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP1 -j ACCEPT $LOG
+          else
+          $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP1 -j ACCEPT --icmp-type $DATO $LOG
+          fi
+        ;;
+        $ETH2)
+          if [ ${DATO} = "+" ] ; then
+          ICMPIN2="1"
+          $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP2 -j ACCEPT $LOG
+          else
+          $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP2 -j ACCEPT --icmp-type $DATO $LOG
+          fi
+        ;;
+        $ETH3)
+          if [ ${DATO} = "+" ] ; then
+          ICMPIN3="1"
+          $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP3 -j ACCEPT $LOG
+          else
+          $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP3 -j ACCEPT --icmp-type $DATO $LOG
+          fi
+        esac
+        ;;
+        *) # Regla normal para otros paquetes
+        case $DISP in
+        $PPP)
+                $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $INETADDR --dport $DATO -j ACCEPT $LOG
+        ;;
+        $ETH0)
+                $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP0 --dport $DATO -j ACCEPT $LOG
+        ;;
+        $ETH1)
+                $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP1 --dport $DATO -j ACCEPT $LOG
+        ;;
+        $ETH2)
+                $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP2 --dport $DATO -j ACCEPT $LOG
+        ;;
+        $ETH3)
+                $REALFIREWALL -A INPUT -i $DISP -p $PROTO -s 0/0 -d $IP3 --dport $DATO -j ACCEPT $LOG
+        esac
+        esac
+        esac
+    esac
+    fi
+    esac
+done
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>> DEVOLUCION DE PAQUETES INPUT <<<<<<<<<<<<<<<<<<<
+# ###############################################################
+
+if [ ${DEVOLUCIONIN} = "1" ] ; then
+  # Si se aceptan todos los icmp no hacer REJECT
+  # Nos aseguramos que los paquetes icmp no aceptados son devueltos
+  if [ ${ICMPINP} = "0" ] ; then
+    if [ ${PPP} != "CLEAR" ] ; then
+      $REALFIREWALL -A INPUT -i $PPP -p icmp -s 0/0 -d $INETADDR -j LOG
+      $REALFIREWALL -A INPUT -i $PPP -p icmp -s 0/0 -d $INETADDR -j REJECT
+    fi
+  fi
+  if [ ${ICMPIN0} = "0" ] ; then
+    if [ ${ETH0} != "CLEAR" ] ; then
+      $REALFIREWALL -A INPUT -i $ETH0 -p icmp -s 0/0 -d $IP0 -j LOG
+      $REALFIREWALL -A INPUT -i $ETH0 -p icmp -s 0/0 -d $IP0 -j REJECT
+    fi
+  fi
+  if [ ${ICMPIN1} = "0" ] ; then
+    if [ ${ETH1} != "CLEAR" ] ; then
+      $REALFIREWALL -A INPUT -i $ETH1 -p icmp -s 0/0 -d $IP1 -j LOG
+      $REALFIREWALL -A INPUT -i $ETH1 -p icmp -s 0/0 -d $IP1 -j REJECT
+    fi
+  fi
+  if [ ${ICMPIN2} = "0" ] ; then
+    if [ ${ETH2} != "CLEAR" ] ; then
+      $REALFIREWALL -A INPUT -i $ETH2 -p icmp -s 0/0 -d $IP2 -j LOG
+      $REALFIREWALL -A INPUT -i $ETH2 -p icmp -s 0/0 -d $IP2 -j REJECT
+    fi
+  fi
+  if [ ${ICMPIN3} = "0" ] ; then
+    if [ ${ETH3} != "CLEAR" ] ; then
+      $REALFIREWALL -A INPUT -i $ETH3 -p icmp -s 0/0 -d $IP3 -j LOG
+      $REALFIREWALL -A INPUT -i $ETH3 -p icmp -s 0/0 -d $IP3 -j REJECT
+    fi
+  fi
+fi
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>> ASEGURAMIENTO DE CIERRE DE PUERTOS NO ABIERTOS <<<<<<<<
+# ###############################################################
+
+# Asegura el cierre de los puertos ROOT y la apertura de los NO ROOT
+if [ ${ASEGURAMIENTO} = "1" ] ; then
+# Puertos para asegurar el control y tapar posibles boquetes de seguridad (PPP)
+if [ ${PPP} != "CLEAR" ] ; then
+   # - Puertos ROOT
+    $REALFIREWALL -A INPUT -i $PPP -p tcp -s 0/0 -d $INETADDR --dport $ROOT -j LOG
+    $REALFIREWALL -A INPUT -i $PPP -p tcp -s 0/0 -d $INETADDR --dport $ROOT -j DROP
+    $REALFIREWALL -A INPUT -i $PPP -p udp -s 0/0 -d $INETADDR --dport $ROOT -j LOG
+    $REALFIREWALL -A INPUT -i $PPP -p udp -s 0/0 -d $INETADDR --dport $ROOT -j DROP
+
+   # - Puertos NO ROOT
+   $REALFIREWALL -A INPUT -i $PPP -p tcp -s 0/0 -d $INETADDR --dport $NO_ROOT -j ACCEPT $LOG
+   $REALFIREWALL -A INPUT -i $PPP -p udp -s 0/0 -d $INETADDR --dport $NO_ROOT -j ACCEPT $LOG
+fi
+
+# Puertos para asegurar el control y tapar posibles boquetes de seguridad (ETH0)
+if [ ${ETH0} != "CLEAR" ] ; then
+   # - Puertos ROOT
+    $REALFIREWALL -A INPUT -i $ETH0 -p tcp -s 0/0 -d $IP0 --dport $ROOT -j LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -p tcp -s 0/0 -d $IP0 --dport $ROOT -j DROP
+    $REALFIREWALL -A INPUT -i $ETH0 -p udp -s 0/0 -d $IP0 --dport $ROOT -j LOG
+    $REALFIREWALL -A INPUT -i $ETH0 -p udp -s 0/0 -d $IP0 --dport $ROOT -j DROP
+
+   # - Puertos NO ROOT
+   $REALFIREWALL -A INPUT -i $ETH0 -p tcp -s 0/0 -d $IP0 --dport $NO_ROOT -j ACCEPT $LOG
+   $REALFIREWALL -A INPUT -i $ETH0 -p udp -s 0/0 -d $IP0 --dport $NO_ROOT -j ACCEPT $LOG
+fi
+
+# Puertos para asegurar el control y tapar posibles boquetes de seguridad (ETH1)
+if [ ${ETH1} != "CLEAR" ] ; then
+   # - Puertos ROOT
+    $REALFIREWALL -A INPUT -i $ETH1 -p tcp -s 0/0 -d $IP1 --dport $ROOT -j LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -p tcp -s 0/0 -d $IP1 --dport $ROOT -j DROP
+    $REALFIREWALL -A INPUT -i $ETH1 -p udp -s 0/0 -d $IP1 --dport $ROOT -j LOG
+    $REALFIREWALL -A INPUT -i $ETH1 -p udp -s 0/0 -d $IP1 --dport $ROOT -j DROP
+
+   # - Puertos NO ROOT
+   $REALFIREWALL -A INPUT -i $ETH1 -p tcp -s 0/0 -d $IP1 --dport $NO_ROOT -j ACCEPT $LOG
+   $REALFIREWALL -A INPUT -i $ETH1 -p udp -s 0/0 -d $IP1 --dport $NO_ROOT -j ACCEPT $LOG
+fi
+
+# Puertos para asegurar el control y tapar posibles boquetes de seguridad (ETH2)
+if [ ${ETH2} != "CLEAR" ] ; then
+   # - Puertos ROOT
+    $REALFIREWALL -A INPUT -i $ETH2 -p tcp -s 0/0 -d $IP2 --dport $ROOT -j LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -p tcp -s 0/0 -d $IP2 --dport $ROOT -j DROP
+    $REALFIREWALL -A INPUT -i $ETH2 -p udp -s 0/0 -d $IP2 --dport $ROOT -j LOG
+    $REALFIREWALL -A INPUT -i $ETH2 -p udp -s 0/0 -d $IP2 --dport $ROOT -j DROP
+
+   # - Puertos NO ROOT
+   $REALFIREWALL -A INPUT -i $ETH2 -p tcp -s 0/0 -d $IP2 --dport $NO_ROOT -j ACCEPT $LOG
+   $REALFIREWALL -A INPUT -i $ETH2 -p udp -s 0/0 -d $IP2 --dport $NO_ROOT -j ACCEPT $LOG
+fi
+
+# Puertos para asegurar el control y tapar posibles boquetes de seguridad (ETH3)
+if [ ${ETH3} != "CLEAR" ] ; then
+   # - Puertos ROOT
+    $REALFIREWALL -A INPUT -i $ETH3 -p tcp -s 0/0 -d $IP3 --dport $ROOT -j LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -p udp -s 0/0 -d $IP3 --dport $ROOT -j DROP
+    $REALFIREWALL -A INPUT -i $ETH3 -p tcp -s 0/0 -d $IP3 --dport $ROOT -j LOG
+    $REALFIREWALL -A INPUT -i $ETH3 -p udp -s 0/0 -d $IP3 --dport $ROOT -j DROP
+
+   # - Puertos NO ROOT
+   $REALFIREWALL -A INPUT -i $ETH3 -p tcp -s 0/0 -d $IP3 --dport $NO_ROOT -j ACCEPT $LOG
+   $REALFIREWALL -A INPUT -i $ETH3 -p udp -s 0/0 -d $IP3 --dport $NO_ROOT -j ACCEPT $LOG
+fi
+fi
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>> TABLAS DE FIREWALL OUTPUT <<<<<<<<<<<<<<<<<<<
+# ###############################################################
+
+# Procesamos la tabla del firewall
+count="0"
+ICMPOUTP="0"
+ICMPOUT0="0"
+ICMPOUT1="0"
+ICMPOUT2="0"
+ICMPOUT3="0"
+LINEA="A"
+for DATO in $FIREWALLOUT ; do
+  case $DATO in
+  /) # Linea comentada
+    if [ ${LINEA} = "A" ] ; then
+      LINEA="D"
+    else
+      LINEA="A"
+    fi
+  ;;
+  *)
+    if [ ${LINEA} = "A" ] ; then
+    case $count in
+    0) # Leemos el dispositivo
+    count="1"
+    DISP=$DATO
+    ;;
+    1) # Leemos el tipo de paquete y de servicio
+    case $DATO in
+    tcp) # Protocolo TCP
+    PROTO="tcp"
+    ;;
+    udp) # Protocolo UDP
+    PROTO="udp"
+    ;;
+    icmp) # Protocolo ICMP
+    PROTO="icmp"
+    ;;
+    @) # Fin de la linea
+    count="0"
+    ;;
+    *) # Procesamos el servicio
+      case $PROTO in
+        icmp) # Regla especial para los paquetes ICMP
+        case $DISP in
+        $PPP)
+          if [ ${DATO} = "+" ] ; then
+          ICMPOUTP="1"
+          $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $INETADDR -d 0/0 -j ACCEPT $LOG
+          else
+          $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $INETADDR -d 0/0 -j ACCEPT --icmp-type $DATO $LOG
+          fi
+        ;;
+        $ETH0)
+          if [ ${DATO} = "+" ] ; then
+          ICMPOUT0="1"
+          $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP0 -d 0/0 -j ACCEPT $LOG
+          else
+          $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP0 -d 0/0 -j ACCEPT --icmp-type $DATO $LOG
+          fi
+        ;;
+        $ETH1)
+          if [ ${DATO} = "+" ] ; then
+          ICMPOUT1="1"
+          $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP1 -d 0/0 -j ACCEPT $LOG
+          else
+          $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP1 -d 0/0 -j ACCEPT --icmp-type $DATO $LOG
+          fi
+        ;;
+        $ETH2)
+          if [ ${DATO} = "+" ] ; then
+          ICMPOUT2="1"
+          $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP2 -d 0/0 -j ACCEPT $LOG
+          else
+          $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP2 -d 0/0 -j ACCEPT --icmp-type $DATO $LOG
+          fi
+        ;;
+        $ETH3)
+          if [ ${DATO} = "+" ] ; then
+          ICMPOUT3="1"
+          $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP3 -d 0/0 -j ACCEPT $LOG
+          else
+          $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP3 -d 0/0 -j ACCEPT --icmp-type $DATO $LOG
+          fi
+        esac
+        ;;
+        *) # Regla normal para otros paquetes
+        case $DISP in
+        $PPP)
+                $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $INETADDR --sport $DATO -d 0/0 -j ACCEPT $LOG
+        ;;
+        $ETH0)
+                $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP0 --sport $DATO -d 0/0 -j ACCEPT $LOG
+        ;;
+        $ETH1)
+                $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP1 --sport $DATO -d 0/0 -j ACCEPT $LOG
+        ;;
+        $ETH2)
+                $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP2 --sport $DATO -d 0/0 -j ACCEPT $LOG
+        ;;
+        $ETH3)
+                $REALFIREWALL -A OUTPUT -o $DISP -p $PROTO -s $IP3 --sport $DATO -d 0/0 -j ACCEPT $LOG
+        esac
+        esac
+        esac
+    esac
+    fi
+    esac
+done
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>> DEVOLUCION DE PAQUETES OUTPUT <<<<<<<<<<<<<<<<<<<
+# ###############################################################
+
+if [ ${DEVOLUCIONOUT} = "1" ] ; then
+  # Si se aceptan todos los icmp no hacer REJECT
+  # Nos aseguramos que los paquetes icmp no aceptados son devueltos
+  if [ ${ICMPOUTP} = "0" ] ; then
+    if [ ${PPP} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $PPP -p icmp -j LOG
+      $REALFIREWALL -A OUTPUT -o $PPP -p icmp -j REJECT
+    fi
+  fi
+  if [ ${ICMPOUT0} = "0" ] ; then
+    if [ ${ETH0} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH0 -p icmp -j LOG
+      $REALFIREWALL -A OUTPUT -o $ETH0 -p icmp -j REJECT
+    fi
+  fi
+  if [ ${ICMPOUT1} = "0" ] ; then
+    if [ ${ETH1} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH1 -p icmp -j LOG
+      $REALFIREWALL -A OUTPUT -o $ETH1 -p icmp -j REJECT
+    fi
+  fi
+  if [ ${ICMPOUT2} = "0" ] ; then
+    if [ ${ETH2} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH2 -p icmp -j LOG
+      $REALFIREWALL -A OUTPUT -o $ETH2 -p icmp -j REJECT
+    fi
+  fi
+  if [ ${ICMPOUT3} = "0" ] ; then
+    if [ ${ETH3} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH3 -p icmp -j LOG
+      $REALFIREWALL -A OUTPUT -o $ETH3 -p icmp -j REJECT
+    fi
+  fi
+  # Evitar que salgan hacia el exterior paquetes cuyo destino sea
+  # nuestra propia IP
+  if [ ${PPP} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $PPP -d $INETADDR -j REJECT $LOG
+    if [ ${ETH0} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $PPP -d $IP0 -j REJECT $LOG
+    fi
+    if [ ${ETH1} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $PPP -d $IP1 -j REJECT $LOG
+    fi
+    if [ ${ETH2} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $PPP -d $IP2 -j REJECT $LOG
+    fi
+    if [ ${ETH3} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $PPP -d $IP3 -j REJECT $LOG
+    fi
+  fi
+  if [ ${ETH0} != "CLEAR" ] ; then
+    $REALFIREWALL -A OUTPUT -o $ETH0 -d $IP0 -j REJECT $LOG
+    if [ ${PPP} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH0 -d $INETADDR -j REJECT $LOG
+    fi
+    if [ ${ETH1} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH0 -d $IP1 -j REJECT $LOG
+    fi
+    if [ ${ETH2} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH0 -d $IP2 -j REJECT $LOG
+    fi
+    if [ ${ETH3} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH0 -d $IP3 -j REJECT $LOG
+    fi
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    $REALFIREWALL -A OUTPUT -o $ETH1 -d $IP1 -j REJECT $LOG
+    if [ ${PPP} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH1 -d $INETADDR -j REJECT $LOG
+    fi
+    if [ ${ETH0} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH1 -d $IP0 -j REJECT $LOG
+    fi
+    if [ ${ETH2} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH1 -d $IP2 -j REJECT $LOG
+    fi
+    if [ ${ETH3} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH1 -d $IP3 -j REJECT $LOG
+    fi
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    $REALFIREWALL -A OUTPUT -o $ETH2 -d $IP2 -j REJECT $LOG
+    if [ ${PPP} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH2 -d $INETADDR -j REJECT $LOG
+    fi
+    if [ ${ETH0} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH2 -d $IP0 -j REJECT $LOG
+    fi
+    if [ ${ETH1} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH2 -d $IP1 -j REJECT $LOG
+    fi
+    if [ ${ETH3} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH2 -d $IP3 -j REJECT $LOG
+    fi
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    $REALFIREWALL -A OUTPUT -o $ETH3 -d $IP3 -j REJECT $LOG
+    if [ ${PPP} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH3 -d $INETADDR -j REJECT $LOG
+    fi
+    if [ ${ETH0} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH3 -d $IP0 -j REJECT $LOG
+    fi
+    if [ ${ETH1} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH3 -d $IP1 -j REJECT $LOG
+    fi
+    if [ ${ETH2} != "CLEAR" ] ; then
+      $REALFIREWALL -A OUTPUT -o $ETH3 -d $IP2 -j REJECT $LOG
+    fi
+  fi
+
+  # Evitar que salgan paquetes con origen o destino 127.0.0.1
+  if [ ${PPP} != "CLEAR" ] ; then
+    $REALFIREWALL -A OUTPUT -o $PPP -s $LOOPBACK -j REJECT $LOG
+    $REALFIREWALL -A OUTPUT -o $PPP -d $LOOPBACK -j REJECT $LOG
+  fi
+  if [ ${ETH0} != "CLEAR" ] ; then
+    $REALFIREWALL -A OUTPUT -o $ETH0 -s $LOOPBACK -j REJECT $LOG
+    $REALFIREWALL -A OUTPUT -o $ETH0 -d $LOOPBACK -j REJECT $LOG
+  fi
+  if [ ${ETH1} != "CLEAR" ] ; then
+    $REALFIREWALL -A OUTPUT -o $ETH1 -s $LOOPBACK -j REJECT $LOG
+    $REALFIREWALL -A OUTPUT -o $ETH1 -d $LOOPBACK -j REJECT $LOG
+  fi
+  if [ ${ETH2} != "CLEAR" ] ; then
+    $REALFIREWALL -A OUTPUT -o $ETH2 -s $LOOPBACK -j REJECT $LOG
+    $REALFIREWALL -A OUTPUT -o $ETH2 -d $LOOPBACK -j REJECT $LOG
+  fi
+  if [ ${ETH3} != "CLEAR" ] ; then
+    $REALFIREWALL -A OUTPUT -o $ETH3 -s $LOOPBACK -j REJECT $LOG
+    $REALFIREWALL -A OUTPUT -o $ETH3 -d $LOOPBACK -j REJECT $LOG
+  fi
+fi
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>>>>>>>>>>> OTROS <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+# ###############################################################
+
+if [ ${INTRAOUT} = "1" ] ; then
+# ------->>>>>>>>>>> PERMITIR SALIDA A LA RED <<<<<<<<<<<<<<-------
+# Permite salir a los paquetes con destino a la red local
+if [ ${ETH0} != "CLEAR" ] ; then
+  $REALFIREWALL -A OUTPUT -o $ETH0 -s $IP0 -d $LOCALNET0 -j ACCEPT $LOG
+fi
+if [ ${ETH1} != "CLEAR" ] ; then
+  $REALFIREWALL -A OUTPUT -o $ETH1 -s $IP1 -d $LOCALNET1 -j ACCEPT $LOG
+fi
+if [ ${ETH2} != "CLEAR" ] ; then
+  $REALFIREWALL -A OUTPUT -o $ETH2 -s $IP2 -d $LOCALNET2 -j ACCEPT $LOG
+fi
+if [ ${ETH3} != "CLEAR" ] ; then
+  $REALFIREWALL -A OUTPUT -o $ETH3 -s $IP3 -d $LOCALNET3 -j ACCEPT $LOG
+fi
+fi
+
+if [ ${REENVIO} = "1" ] ; then
+# ---------->>>>>>>>>>> REENVIO DE PAQUETES <<<<<<<<<<<<<<---------
+# Posibilito el reenvio de paquetes
+echo "1" > /proc/sys/net/ipv4/ip_forward
+fi
+
+if [ ${MASQUERADING} = "1" ] ; then
+# ------------->>>>>>>>>>> MASQUERADING <<<<<<<<<<<<<<-------------
+# Se configura masquerading para permitir Internet a las maquinas locales.
+for IPMASQ in $MASQ ; do
+  case $IPMASQ in
+  /) # Linea comentada
+    if [ ${LINEA} = "A" ] ; then
+      LINEA="D"
+    else
+      LINEA="A"
+    fi
+  ;;
+  *)
+    if [ ${LINEA} = "A" ] ; then
+      $REALFIREWALL -t nat -A POSTROUTING -o $PPP -s $IPMASQ -d $TODAS -j MASQUERADE $LOG
+      $REALFIREWALL -A FORWARD -s $IPMASQ -d $TODAS -j ACCEPT $LOG
+      $REALFIREWALL -A FORWARD -s $TODAS -d $IPMASQ -j ACCEPT $LOG
+    fi
+  esac
+done
+fi
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>>>>>> ENTRADA/SALIDA <<<<<<<<<<<<<<<<<<<<<<<<<<
+# ###############################################################
+
+if [ ${IOPACK} = "1" ] ; then
+# Posibilito la entrada/salida de paquetes en mi maquina con
+# destino a otro lugar
+if [ ${ETH0} != "CLEAR" ] ; then
+  $REALFIREWALL -A INPUT -i $ETH0 -s $LOCALNET0 -d 0/0 -j ACCEPT $LOG
+  $REALFIREWALL -A OUTPUT -o $ETH0 -s 0/0 -d $LOCALNET0 -j ACCEPT $LOG
+fi
+if [ ${ETH1} != "CLEAR" ] ; then
+  $REALFIREWALL -A INPUT -i $ETH1 -s $LOCALNET1 -d 0/0 -j ACCEPT $LOG
+  $REALFIREWALL -A OUTPUT -o $ETH1 -s 0/0 -d $LOCALNET1 -j ACCEPT $LOG
+fi
+if [ ${ETH2} != "CLEAR" ] ; then
+  $REALFIREWALL -A INPUT -i $ETH2 -s $LOCALNET2 -d 0/0 -j ACCEPT $LOG
+  $REALFIREWALL -A OUTPUT -o $ETH2 -s 0/0 -d $LOCALNET2 -j ACCEPT $LOG
+fi
+if [ ${ETH3} != "CLEAR" ] ; then
+  $REALFIREWALL -A INPUT -i $ETH3 -s $LOCALNET3 -d 0/0 -j ACCEPT $LOG
+  $REALFIREWALL -A OUTPUT -o $ETH3 -s 0/0 -d $LOCALNET3 -j ACCEPT $LOG
+fi
+fi
+# ###############################################################
+
+
+# ###############################################################
+# >>>>>>>>>>>>>>>>>>>>>>> INFORMACION <<<<<<<<<<<<<<<<<<<<<<<<<<<
+# ###############################################################
+if [ ${INFO} = "1" ] ; then
+# Informacion
+echo ""
+echo "============================================================================"
+echo "Tipo      Direccion IP + Disp Localnet    Broadcast"
+if [ ${PPP} != "CLEAR" ] ; then
+echo "Internet: $INETADDR en $PPP"
+fi
+if [ ${ETH0} != "CLEAR" ] ; then
+
+echo "Dispositivo 0:    $IP0 en $ETH0   $LOCALNET0  $BROADCAST0"
+fi
+if [ ${ETH1} != "CLEAR" ] ; then
+echo "Dispositivo 1:    $IP1 en $ETH1   $LOCALNET1  $BROADCAST1"
+fi
+if [ ${ETH2} != "CLEAR" ] ; then
+echo "Dispositivo 2:    $IP2 en $ETH2   $LOCALNET2  $BROADCAST2"
+fi
+if [ ${ETH3} != "CLEAR" ] ; then
+echo "Dispositivo 3:    $IP3 en $ETH3   $LOCALNET3  $BROADCAST3"
+fi
+echo "============================================================================"
+echo -n "PROTECCIÓN SPOOFING: "
+    if [ ${SPOOFING} = "1" ] ; then
+    echo "ACTIVADO"
+    else
+    echo "DESACTIVADO"
+    fi
+echo -n "PROTECCIÓN CONTRA EL BROADCAST: "
+    if [ ${BROADCASTPROTECTION} = "1" ] ; then
+    echo "ACTIVADO"
+    else
+    echo "DESACTIVADO"
+    fi
+echo -n "SERVIDOR TRASPARENTE: "
+    if [ ${TRANSPARENTSERVER} = "0" ] ; then
+    echo "DESACTIVADO"
+    else
+    echo "ACTIVADO"
+    fi
+fi
+# ###############################################################
+
+exit 0

@@ -1,0 +1,33 @@
+/ 
+####### FIREWALL INPUT ######################################################
+# TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com #
+# Firewall input, abre servicios asequibles desde fuera:                    #
+#      <Dispositivo> <Protocolo> <Servicios> @                              #
+#      eth1 tcp    ftp  ftp-data  @                                         #
+#      Permite el acceso al ftp de la maquina para la red conectada a eth1  #
+#############################################################################
+/
+
+/
+# Puertos pendientes:
+# jabber-client    - 5222 - Clientes Jabber sin SSL
+# jabber-clientssl - 5223 - Clientes Jabber con SSL
+# jabber-server    - 5269 - Conecta a otros Jabbers
+# Puertos si nombre:
+# AntiSpam DCC     - 6277 - DCC??
+/
+
+eth0 icmp   0  3  5  8  11                                                                           @
+eth0 tcp    auth domain ftp ftp-data www https pop3 smtp pop3s imaps smtps 24 openvpn ntp submission @
+eth0 udp         domain              www https pop3      pop3s imaps          openvpn ntp submission @
+
+tun0 icmp   0  3  8  11                                                                              @
+tun0 tcp    auth domain ftp ftp-data www https pop3 smtp pop3s imaps smtps 24 ssh svn ntp submission @
+tun0 udp         domain              www https pop3      pop3s imaps          ssh svn ntp submission @
+
+tun1 icmp   0  3  8  11                                                                              @
+tun1 tcp    auth domain ftp ftp-data www https pop3 smtp pop3s imaps smtps 24 ssh svn ntp submission @
+tun1 udp         domain              www https pop3      pop3s imaps          ssh svn ntp submission @
+
+tun2 icmp   0 3 8 11 @
+

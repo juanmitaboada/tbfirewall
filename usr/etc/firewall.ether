@@ -1,0 +1,33 @@
+/
+####### FIREWALL ETHER ########################################################
+# TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com   #
+# Firewall ether controla los paquetes que circulan entre dos redes que estan #
+# comunicadas por un servidor que hace de router, bridge o similar:           #
+#  <Trato del paquete> <Disp Origen> <Disp Destino> <Protocolo> <Servicio> @  #
+#  DROP eth0 eth1 tcp 0:65535 @                                               #
+#  DROP eth0 eth1 udp 0:65535 @                                               #
+#  DROP eth0 eth1 icmp + @                                                    #
+#  DROP eth1 eth0 tcp 0:65535 @                                               #
+#  DROP eth1 eth0 udp 0:65535 @                                               #
+#  DROP eth1 eth0 icmp + @                                                    #
+#  Impide que las redes conectadas a eth0 y eth1 puedan verse y/o conectarse  #
+###############################################################################
+/
+
+/
+ACCEPT eth2 wlan0 tcp 0:65535 @
+ACCEPT eth2 wlan0 udp 0:65535 @
+ACCEPT eth2 wlan0 icmp + @
+ACCEPT wlan0 eth2 tcp 0:65535 @
+ACCEPT wlan0 eth2 udp 0:65535 @
+ACCEPT wlan0 eth2 icmp + @
+/
+
+/
+DROP eth0 eth1 tcp 0:65535 @
+DROP eth0 eth1 udp 0:65535 @
+DROP eth0 eth1 icmp + @
+DROP eth1 eth0 tcp 0:65535 @
+DROP eth1 eth0 udp 0:65535 @
+DROP eth1 eth0 icmp + @
+/

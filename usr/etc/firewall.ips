@@ -1,0 +1,10 @@
+/ FIREWALL IPS /
+/ TBFirewall v3.1 - juanmi@juanmitaboada.com - http://www.juanmitaboada.com /
+/ Cualquier comentario que contenga este archivo podra perder su formato /
+/ si no se especifican las barras al principio y al final de cada linea. /
+L	192.168.0.0/16
+E	192.168.252.1	tun0	192.168.252.0/24	192.168.252.255
+E	192.168.241.1	tun1	192.168.241.0/24	192.168.241.255
+E	192.168.254.17	tun2	192.168.254.0/24	192.168.254.255
+I	37.187.75.103	eth0
+TRANSPARENTSERVER 1
